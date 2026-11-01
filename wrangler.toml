@@ -35,7 +35,7 @@ CLAUDE_MODEL_STRONG = "claude-sonnet-5-5"  # khi bấm "Soạn kỹ"
 WEB_VERIFY = "1"                            # 1 = tra web kiểm chứng (≈0,01 USD/lượt tìm)
 WEB_SEARCH_MAX = "3"
 FB_GRAPH_VERSION = "v26.0"
-DRY_RUN = "1"                               # đổi "0" khi sẵn sàng đăng thật
+DRY_RUN = "0"                               # đổi "0" khi sẵn sàng đăng thật
 DEFAULT_QR_URL = "https://form.thtaudit.com.vn/"
 THT_PHONE = "0901 144 078"
 THT_EMAILS = "tht@thtaudit.com.vn,danang@thtaudit.com.vn"
