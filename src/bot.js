@@ -276,13 +276,13 @@ export async function tiktokRoutes(url, env) {
     if (url.searchParams.get("key") !== env.APP_PASSWORD) return new Response("Sai mật khẩu", { status: 403 });
     const state = crypto.randomUUID();
     await kvSet(env, "tiktok_state", state);
-    const q = new URLSearchParams({ client_key: env.TIKTOK_CLIENT_KEY, scope: "user.info.basic,video.publish,video.upload", response_type: "code", redirect_uri: redirect, state });
+    const q = new URLSearchParams({ client_key: String(env.TIKTOK_CLIENT_KEY || "").trim(), scope: env.TIKTOK_MODE === "direct" ? "user.info.basic,video.publish,video.upload" : "user.info.basic,video.upload", response_type: "code", redirect_uri: redirect, state });
     return Response.redirect(`https://www.tiktok.com/v2/auth/authorize/?${q}`, 302);
   }
   if (url.pathname === "/tiktok/callback") {
     if (url.searchParams.get("state") !== (await kvGet(env, "tiktok_state"))) return new Response("Phiên đăng nhập không hợp lệ", { status: 400 });
     const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_key: env.TIKTOK_CLIENT_KEY, client_secret: env.TIKTOK_CLIENT_SECRET, code: url.searchParams.get("code") || "", grant_type: "authorization_code", redirect_uri: redirect }) });
+      body: new URLSearchParams({ client_key: String(env.TIKTOK_CLIENT_KEY || "").trim(), client_secret: String(env.TIKTOK_CLIENT_SECRET || "").trim(), code: url.searchParams.get("code") || "", grant_type: "authorization_code", redirect_uri: redirect }) });
     const tok = await res.json();
     if (!tok.access_token) return new Response(`TikTok không cấp token: ${JSON.stringify(tok)}`, { status: 400 });
     await kvSet(env, "tiktok_token", JSON.stringify({ ...tok, obtained_at: Date.now() }));
@@ -297,7 +297,7 @@ async function tiktokAccessToken(env) {
   const tok = JSON.parse(raw);
   if (Date.now() < tok.obtained_at + (tok.expires_in - 300) * 1000) return tok.access_token;
   const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_key: env.TIKTOK_CLIENT_KEY, client_secret: env.TIKTOK_CLIENT_SECRET, grant_type: "refresh_token", refresh_token: tok.refresh_token }) });
+    body: new URLSearchParams({ client_key: String(env.TIKTOK_CLIENT_KEY || "").trim(), client_secret: String(env.TIKTOK_CLIENT_SECRET || "").trim(), grant_type: "refresh_token", refresh_token: tok.refresh_token }) });
   const n = await res.json();
   if (!n.access_token) throw new Error("Làm mới token TikTok thất bại, cần kết nối lại");
   await kvSet(env, "tiktok_token", JSON.stringify({ ...n, obtained_at: Date.now() }));
