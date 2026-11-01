@@ -189,6 +189,8 @@ def main():
         if "tiktok" in targets:
             try: results.append(f"🎵 TikTok: {post_tiktok(out, man['tiktok_caption'] or tags, man['tiktok_mode'], man['tiktok_privacy'])}")
             except Exception as e: results.append(f"🎵 TikTok lỗi: {e}")
+            if man.get("tiktok_mode") != "direct":
+                results.append("\n📋 Caption TikTok (bấm giữ để copy, dán khi đăng):\n\n" + (man.get("tiktok_caption") or tags))
         if "youtube" in targets:
             try: results.append(f"▶️ YouTube: {post_youtube(out, man['youtube_title'], man['youtube_description'], man.get('youtube_tags', []), man['youtube_privacy'])}")
             except Exception as e: results.append(f"▶️ YouTube lỗi: {e}")
