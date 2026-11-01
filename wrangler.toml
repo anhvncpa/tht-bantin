@@ -29,7 +29,7 @@ max_retries = 0
 cpu_ms = 120000          # cần gói Workers Paid (đọc Excel lớn, mã hoá PDF)
 
 [vars]
-PUBLIC_BASE_URL = "https://tht-bantin.TEN-TAI-KHOAN.workers.dev"   # đổi thành link Worker (hoặc tên miền riêng)
+PUBLIC_BASE_URL = "https://tht-bantin.thtdn.workers.dev"   # đổi thành link Worker (hoặc tên miền riêng)
 CLAUDE_MODEL = "claude-haiku-5-5"          # rẻ nhất, mặc định
 CLAUDE_MODEL_STRONG = "claude-sonnet-5-5"  # khi bấm "Soạn kỹ"
 WEB_VERIFY = "1"                            # 1 = tra web kiểm chứng (≈0,01 USD/lượt tìm)

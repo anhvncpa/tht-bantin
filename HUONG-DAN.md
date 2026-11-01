@@ -56,7 +56,7 @@ Vì sao bot Telegram cần gói Workers Paid: gói miễn phí chỉ cho mỗi l
 
 | Secret | Giá trị |
 |---|---|
-| `WORKER_URL` | Link Worker, vd `https://tht-bantin.xxx.workers.dev` |
+| `WORKER_URL` | Link Worker, vd `https://tht-bantin.thtdn.workers.dev` |
 | `INTERNAL_KEY` | Một chuỗi ngẫu nhiên dài, giống hệt biến cùng tên trong Cloudflare |
 | `FB_PAGE_ID`, `FB_PAGE_TOKEN` | Giống bên Cloudflare (bước 4) |
 | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` | Lấy ở bước 6 |
