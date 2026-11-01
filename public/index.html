@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bản tin THT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: top bar; left column = input steps, right column = poster preview + caption + publish. Stacks on phones. */
+:root{
+  --bg:#F3F5F8;--surface:#FFFFFF;--ink:#172B3B;--muted:#56677A;--line:#DCE3EA;--soft:#F7F9FB;
+  --navy:#172B3B;--accent:#FC5A1B;--accent-ink:#FFFFFF;--accent-soft:#FFF1EA;
+  --ok:#1E7A4F;--ok-bg:#E4F4EB;--warn:#A2410F;--warn-bg:#FFF0E6;--err:#B42318;--err-bg:#FDECEA;
+  --font:'Inter','Segoe UI',Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F1720;--surface:#17222E;--ink:#E7EDF3;--muted:#A3B2C2;--line:#2B3A4A;--soft:#1C2835;
+  --navy:#0B1A28;--accent:#FF6A2E;--accent-ink:#1A0E06;--accent-soft:#3A2116;
+  --ok:#7FD3A6;--ok-bg:#15352A;--warn:#FFB287;--warn-bg:#3A2316;--err:#FF9A8F;--err-bg:#3B1B18;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1720;--surface:#17222E;--ink:#E7EDF3;--muted:#A3B2C2;--line:#2B3A4A;--soft:#1C2835;
+  --navy:#0B1A28;--accent:#FF6A2E;--accent-ink:#1A0E06;--accent-soft:#3A2116;
+  --ok:#7FD3A6;--ok-bg:#15352A;--warn:#FFB287;--warn-bg:#3A2316;--err:#FF9A8F;--err-bg:#3B1B18;color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14.5px;line-height:1.5}
+.bar{background:var(--navy);color:#fff;position:sticky;top:0;z-index:5}
+.bar .in{max-width:1320px;margin:0 auto;padding:12px max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:12px}
+.mark{width:36px;height:36px;border-radius:7px;background:#E3A72F;color:#172B3B;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.bar b{font-size:13px;letter-spacing:1px;display:block}.bar small{color:#B9C8D8;font-size:11.5px}
+.pill{margin-left:auto;font-size:11.5px;font-weight:700;letter-spacing:.5px;padding:5px 10px;border-radius:20px;background:#2C4356;color:#fff;white-space:nowrap}
+.pill.live{background:var(--accent);color:#fff}
+.wrap{max-width:1320px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.step{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.step i{font-style:normal;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:20px 14px;text-align:center;background:var(--soft);cursor:pointer;transition:border-color .15s}
+.drop:hover,.drop.over{border-color:var(--accent)}
+.drop strong{display:block;font-size:14.5px}.drop span{color:var(--muted);font-size:12.5px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.files{display:flex;flex-direction:column;gap:6px}
+.file{display:flex;align-items:center;gap:8px;font-size:13px;background:var(--soft);border-radius:8px;padding:7px 10px;min-width:0}
+.file .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file .t{color:var(--muted);font-size:12px;white-space:nowrap}
+.x{border:0;background:none;color:var(--muted);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:6px}.x:hover{color:var(--err)}
+.styles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.sw{border:2px solid var(--line);border-radius:10px;padding:0;background:var(--surface);cursor:pointer;overflow:hidden;display:flex;flex-direction:column;font:inherit;color:inherit}
+.sw[aria-pressed="true"]{border-color:var(--accent)}
+.sw .chip{height:44px;display:flex}.sw .chip span{flex:1}
+.sw .lb{font-size:11px;font-weight:600;padding:5px 4px;line-height:1.25;text-align:center}
+label.f{font-size:12.5px;font-weight:600;color:var(--muted);display:flex;flex-direction:column;gap:5px}
+input[type=text],input[type=password],textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 11px;width:100%}
+textarea{resize:vertical;min-height:70px}
+input:focus,textarea:focus,button:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px}
+.btn{font:inherit;font-weight:700;border-radius:10px;padding:11px 16px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;min-height:44px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#FFFFFF}
+.btn.pri:disabled,.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn.wide{width:100%}
+.note{font-size:12.5px;color:var(--muted)}
+.msg{border-radius:10px;padding:10px 12px;font-size:13px}
+.msg.ok{background:var(--ok-bg);color:var(--ok)}.msg.warn{background:var(--warn-bg);color:var(--warn)}.msg.err{background:var(--err-bg);color:var(--err)}
+.preview{display:flex;flex-direction:column;gap:14px;min-width:0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:20px;padding:7px 14px;cursor:pointer;min-height:36px}
+.tab[aria-selected="true"]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.stage{background:var(--soft);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;justify-content:center;overflow:hidden}
+.scaler{transform-origin:top left}
+.empty{color:var(--muted);text-align:center;padding:60px 20px;display:flex;flex-direction:column;gap:6px;align-items:center}
+.empty b{color:var(--ink);font-size:16px}
+.spin{width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+.list{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.list li{list-style:none}.list ul{margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.hist{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:8px;background:var(--soft);font-size:12.5px}
+.hist a{color:var(--accent)}
+.dialog{position:fixed;inset:0;background:rgba(10,20,30,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.dialog .card{max-width:440px;width:100%}
+pre.cap{white-space:pre-wrap;font:inherit;margin:0}
+.login{max-width:380px;margin:12vh auto;padding:0 16px}
+@media print{body *{visibility:hidden}#printArea,#printArea *{visibility:visible}#printArea{position:absolute;left:0;top:0}#printArea .pg{page-break-after:always;margin:0!important}@page{size:A4;margin:0}}
+</style>
+</head>
+<body>
+<div class="bar"><div class="in">
+<div class="mark">THT</div>
+<div><b>BẢN TIN THT</b><small>Văn bản mới → poster → Facebook</small></div>
+<span class="pill" id="modePill" hidden></span>
+</div></div>
+
+<section class="login" id="login" hidden>
+<form class="card" id="loginForm">
+<div class="step">Đăng nhập</div>
+<label class="f" for="pw">Mật khẩu ứng dụng<input id="pw" type="password" autocomplete="current-password" required></label>
+<button class="btn pri" type="submit">Vào ứng dụng</button>
+<div class="msg err" id="loginErr" hidden></div>
+</form>
+</section>
+
+<div class="wrap" id="app" hidden>
+<div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+
+<div class="card">
+<div class="step"><i>1</i>Tải tài liệu</div>
+<div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn hoặc thả file">
+<strong>Thả file vào đây hoặc bấm để chọn</strong>
+<span>Word (.docx), Excel (.xlsx/.csv), PDF, ảnh chụp văn bản</span>
+</div>
+<input type="file" id="fileInput" multiple accept=".docx,.xlsx,.csv,.pdf,.txt,image/*" hidden>
+<input type="file" id="camInput" accept="image/*" capture="environment" hidden>
+<div class="row"><button class="btn" type="button" id="camBtn">Chụp ảnh văn bản</button></div>
+<div class="files" id="files"></div>
+</div>
+
+<div class="card">
+<div class="step"><i>2</i>Chọn mẫu poster</div>
+<div class="styles" id="styles"></div>
+</div>
+
+<div class="card">
+<div class="step"><i>3</i>Ghi chú & mã QR</div>
+<label class="f" for="note">Ghi chú cho người soạn (không bắt buộc)<textarea id="note" placeholder="VD: nhấn mạnh thời hạn 03 ngày làm việc"></textarea></label>
+<label class="f" for="qrUrl">Mã QR trỏ tới<input id="qrUrl" type="text" placeholder="https://form.thtaudit.com.vn/"></label>
+<div id="lookupBox" hidden style="display:flex;flex-direction:column;gap:8px">
+<div class="msg warn" id="lookupInfo"></div>
+<label class="f" for="slug">Đường dẫn trang tra cứu<input id="slug" type="text" placeholder="cv3164"></label>
+<label class="chk"><input type="checkbox" id="makeLookup" checked> Tạo trang tra cứu và cho mã QR trỏ tới đó</label>
+</div>
+<label class="f" for="pages">Số trang<select id="pages" style="font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 11px"><option value="auto">Tự động (ưu tiên 1 trang)</option><option value="1">1 trang</option><option value="2">2 trang</option><option value="3">3 trang</option></select></label>
+<label class="chk"><input type="checkbox" id="verify" checked> Cho Claude tra web kiểm chứng số hiệu, mức phạt</label>
+<label class="chk"><input type="checkbox" id="quality"> Soạn kỹ bằng Claude Sonnet (chi phí cao hơn)</label>
+<button class="btn pri wide" type="button" id="goBtn" disabled>Tạo bản tin</button>
+<div class="msg err" id="goErr" hidden></div>
+</div>
+
+<div class="card">
+<div class="step">Đã đăng gần đây</div>
+<ul class="list" id="history"><li class="note">Chưa có bài nào.</li></ul>
+</div>
+</div>
+
+<div class="preview">
+<div class="tabs" role="tablist">
+<button class="tab" role="tab" aria-selected="true" data-tab="poster">Poster</button>
+<button class="tab" role="tab" aria-selected="false" data-tab="caption">Bài Facebook</button>
+<button class="tab" role="tab" aria-selected="false" data-tab="checks">Kiểm chứng</button>
+</div>
+
+<div id="tab-poster" class="stage"><div class="empty" id="emptyState"><b>Chưa có poster</b><span>Tải văn bản bên trái rồi bấm Tạo bản tin. Bấm “Xem mẫu thử” để xem trước giao diện.</span><button class="btn" type="button" id="demoBtn">Xem mẫu thử</button></div><div id="scaler" class="scaler" hidden></div></div>
+<div id="tab-caption" class="card" hidden><label class="f" for="caption">Nội dung bài đăng (sửa trực tiếp được)<textarea id="caption" rows="16"></textarea></label></div>
+<div id="tab-checks" class="card" hidden><div id="checks" class="list"><span class="note">Chưa có kết quả kiểm chứng.</span></div></div>
+
+<div class="card" id="actions" hidden>
+<div class="row" style="align-items:center"><span class="note" id="fitNote"></span></div>
+<label class="f" for="reviseText">Sửa bằng lời<textarea id="reviseText" placeholder="VD: đổi tiêu đề thành…, bỏ ý 3, thêm thời hạn 30 ngày"></textarea></label>
+<div class="row">
+<button class="btn" type="button" id="reviseBtn">Sửa nội dung</button>
+<button class="btn" type="button" id="pngBtn">Tải PNG</button>
+<button class="btn" type="button" id="printBtn">In / Lưu PDF</button>
+<button class="btn pri" type="button" id="pubBtn" style="margin-left:auto">Đăng lên Facebook</button>
+</div>
+<div class="msg" id="actMsg" hidden></div>
+</div>
+</div>
+</div>
+
+<div class="dialog" id="confirmDlg" hidden><div class="card" role="dialog" aria-modal="true" aria-labelledby="cfT">
+<div class="step" id="cfT">Đăng bài lên Facebook Page?</div>
+<div class="note" id="cfBody">Poster và nội dung bài đăng sẽ được đăng công khai lên Page THT.</div>
+<div class="row" style="justify-content:flex-end"><button class="btn" type="button" id="cfNo">Huỷ</button><button class="btn pri" type="button" id="cfYes">Đăng ngay</button></div>
+</div></div>
+
+<div id="busy" class="dialog" hidden><div class="card" style="flex-direction:row;align-items:center"><div class="spin"></div><div id="busyText">Đang xử lý…</div></div></div>
+<div id="printArea" aria-hidden="true"></div>
+
+<script src="/qr.js"></script>
+<script src="/extract.js"></script>
+<script src="/templates.js"></script>
+<script src="/export.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

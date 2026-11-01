@@ -1,0 +1,179 @@
+{
+ "topic_short": "CSHHL",
+ "doc_ref": "CV 3164/DNTN-GS · 07/10/2026",
+ "issuer_sentence": "Cục Phát triển DN tư nhân và KTTT công bố danh sách doanh nghiệp chưa kê khai thông tin CSHHL và yêu cầu hoàn thành việc kê khai.",
+ "title_line1": "Doanh nghiệp phải kê khai",
+ "title_line2": "Chủ sở hữu hưởng lợi",
+ "title_question": "Doanh nghiệp của bạn đã kê khai CSHHL chưa?",
+ "subtitle_en": "Beneficial Ownership Disclosure",
+ "highlight": {
+  "label": "MỨC PHẠT",
+  "value": "50–100",
+  "unit": "triệu đồng",
+  "note": "khi không kê khai CSHHL, kèm buộc bổ sung thông tin (NĐ 288/2026)"
+ },
+ "audience": {
+  "title": "Doanh nghiệp nào phải kê khai?",
+  "items": [
+   {
+    "label": "THÀNH LẬP TỪ 01/07/2025",
+    "text": "Nộp Danh sách CSHHL trong hồ sơ thành lập.",
+    "note": "Về cơ bản đã nộp, nên kiểm tra lại.",
+    "emphasis": false
+   },
+   {
+    "label": "THÀNH LẬP TRƯỚC 01/07/2025",
+    "text": "Bổ sung khi thay đổi nội dung ĐKDN sau mốc này.",
+    "note": "Đã đổi GCN ĐKDN? Rà soát ngay.",
+    "emphasis": true
+   }
+  ]
+ },
+ "points": {
+  "title": "Ai là Chủ sở hữu hưởng lợi?",
+  "hint": "Xét lần lượt, dừng ở bước đầu tiên xác định được",
+  "items": [
+   {
+    "title": "Sở hữu ≥ 25% vốn hoặc cổ phần biểu quyết",
+    "text": "Tính cả trực tiếp và gián tiếp qua tổ chức, thỏa thuận khác.",
+    "detail": "Nhóm gia đình hoặc cùng sở hữu cộng lại ≥ 25%: tất cả đều là CSHHL. Công ty hợp danh: mọi thành viên hợp danh.",
+    "badge": "≥25%"
+   },
+   {
+    "title": "Người có quyền chi phối thực tế",
+    "text": "Khi không có ai ở bước 1, hoặc người đó không hưởng lợi thực tế.",
+    "detail": "Ví dụ: bổ nhiệm/miễn nhiệm đa số HĐQT/HĐTV, Chủ tịch, GĐ/TGĐ; sửa điều lệ; quyết định tài chính, đầu tư.",
+    "badge": "Chi phối"
+   },
+   {
+    "title": "Người quản lý có quyền hạn cao nhất",
+    "text": "Khi vẫn không xác định được ở bước 1 và 2.",
+    "detail": "Không áp dụng với người đại diện phần vốn nhà nước.",
+    "badge": "Quản lý"
+   }
+  ]
+ },
+ "actions": {
+  "title": "Doanh nghiệp cần làm gì?",
+  "items": [
+   {
+    "title": "Tra cứu",
+    "text": "Quét mã QR, nhập MST để kiểm tra DN."
+   },
+   {
+    "title": "Xác định CSHHL",
+    "text": "Rà soát cơ cấu sở hữu theo 3 bước."
+   },
+   {
+    "title": "Kê khai",
+    "text": "Lập Mẫu số 10, nộp Cơ quan ĐKKD."
+   }
+  ]
+ },
+ "facts": [
+  {
+   "label": "MỨC PHẠT",
+   "value": "50–100 triệu",
+   "note": "NĐ 288/2026/NĐ-CP"
+  },
+  {
+   "label": "BIỂU MẪU",
+   "value": "Mẫu số 10",
+   "note": "Phụ lục I, TT 121/2026/TT-BTC"
+  },
+  {
+   "label": "MỐC ÁP DỤNG",
+   "value": "01/07/2025",
+   "note": "Luật DN sửa đổi 2025"
+  }
+ ],
+ "legal_basis": [
+  {
+   "ref": "Luật DN sửa đổi 2025",
+   "desc": "Hiệu lực từ 01/07/2025"
+  },
+  {
+   "ref": "NĐ 296/2026/NĐ-CP",
+   "desc": "Tiêu chí xác định CSHHL"
+  },
+  {
+   "ref": "TT 121/2026/TT-BTC",
+   "desc": "Mẫu số 10, Phụ lục I"
+  },
+  {
+   "ref": "NĐ 288/2026/NĐ-CP",
+   "desc": "Xử phạt vi phạm"
+  }
+ ],
+ "decision": {
+  "q1": "DN thành lập từ 01/07/2025?",
+  "yes1_title": "Đã nộp trong hồ sơ thành lập",
+  "yes1_text": "Kiểm tra lại cho chắc chắn.",
+  "q2": "Có đăng ký/thông báo thay đổi ĐKDN sau 01/07/2025?",
+  "yes2_title": "BẮT BUỘC bổ sung CSHHL",
+  "yes2_text": "Rà soát ngay, quét QR để tra cứu.",
+  "no_title": "Chưa bắt buộc ngay",
+  "no_text": "Kê khai khi thay đổi ĐKDN lần tới."
+ },
+ "recommendation": "Tra cứu ngay danh sách kèm Công văn 3164; rà soát cơ cấu sở hữu trực tiếp và gián tiếp; lập Danh sách CSHHL theo Mẫu số 10 và nộp Cơ quan đăng ký kinh doanh.",
+ "footnote": "Kê khai không trung thực, không chính xác: phạt 30–70 triệu đồng.",
+ "qr_caption": "DN của bạn có trong danh sách CV 3164?",
+ "facebook_caption": "⚠️ DOANH NGHIỆP PHẢI KÊ KHAI CHỦ SỞ HỮU HƯỞNG LỢI\n\n...",
+ "corrections": [],
+ "uncertain": [],
+ "slug": "cv3164",
+ "seo_keywords": [
+  "kê khai chủ sở hữu hưởng lợi",
+  "CSHHL",
+  "công văn 3164/DNTN-GS",
+  "mẫu số 10 TT 121/2026"
+ ],
+ "hashtags": [
+  "#THT",
+  "#KiemToanTuVanTHT",
+  "#ChuSoHuuHuongLoi",
+  "#CSHHL",
+  "#DangKyDoanhNghiep"
+ ],
+ "story_hook": "Doanh nghiệp có thể bị phạt đến 100 triệu!",
+ "tiktok_caption": "Doanh nghiệp đã kê khai chủ sở hữu hưởng lợi chưa? 42.911 DN đang trong diện kiểm tra. #THT #CSHHL",
+ "youtube_title": "Kê khai chủ sở hữu hưởng lợi: DN nào phải làm, phạt bao nhiêu? #Shorts",
+ "youtube_description": "Kê khai chủ sở hữu hưởng lợi (CSHHL) theo Công văn 3164/DNTN-GS...",
+ "youtube_tags": [
+  "chủ sở hữu hưởng lợi",
+  "CSHHL",
+  "THT"
+ ],
+ "extra_pages": [
+  {
+   "title": "Các bước nộp hồ sơ online",
+   "subtitle": "Cổng thông tin quốc gia về đăng ký doanh nghiệp",
+   "sections": [
+    {
+     "heading": "Chuẩn bị",
+     "items": [
+      "Tài khoản VNeID của người có thẩm quyền",
+      "Mẫu số 10 và Mẫu số 12 theo TT 121/2026/TT-BTC",
+      "Giấy ủy quyền nếu người khác nộp"
+     ]
+    },
+    {
+     "heading": "Nộp hồ sơ",
+     "items": [
+      "Đăng nhập dangkykinhdoanh.gov.vn bằng VNeID",
+      "Chọn Đăng ký thay đổi → Thông báo thay đổi",
+      "Nhập khối dữ liệu, mục Thông tin về CSHHL",
+      "Đính kèm Mẫu 10, Mẫu 12 rồi nộp"
+     ]
+    },
+    {
+     "heading": "Sau khi nộp",
+     "items": [
+      "Theo dõi trạng thái ở Danh sách hồ sơ đăng ký",
+      "Bổ sung ngay nếu có yêu cầu sửa đổi"
+     ]
+    }
+   ]
+  }
+ ]
+}

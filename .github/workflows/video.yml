@@ -1,0 +1,38 @@
+name: video
+# Được Worker gọi khi anh bấm đăng Story / TikTok / YouTube trên Telegram
+on:
+  workflow_dispatch:
+    inputs:
+      job_id: { description: "Mã bài", required: true }
+      targets: { description: "story,tiktok,youtube", required: true }
+
+concurrency:
+  group: video-${{ inputs.job_id }}
+
+jobs:
+  build-and-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cài công cụ
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core > /dev/null
+          pip install -q requests
+      - name: Dựng video và đăng
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          INTERNAL_KEY: ${{ secrets.INTERNAL_KEY }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          FB_GRAPH_VERSION: v26.0
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python video/run.py "${{ inputs.job_id }}" "${{ inputs.targets }}"
+      - name: Báo lỗi về Telegram nếu hỏng
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.WORKER_URL }}/api/internal/notify/${{ inputs.job_id }}" \
+            -H "x-internal-key: ${{ secrets.INTERNAL_KEY }}" -H "content-type: application/json" \
+            -d '{"results":["🎬 Luồng video bị lỗi, xem chi tiết ở tab Actions trên GitHub."]}'
