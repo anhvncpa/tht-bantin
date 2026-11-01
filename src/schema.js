@@ -384,7 +384,7 @@ export const POSTER_SCHEMA = {
   },
   "tiktok_caption": {
    "type": "string",
-   "description": "Caption TikTok ≤ 1500 ký tự: câu hook, 3 ý chính, lời kêu gọi, hashtag"
+   "description": "Caption TikTok chuẩn SEO (tìm kiếm trên TikTok), 300–700 ký tự, xuống dòng rõ ràng: dòng 1 là câu hook ≤ 80 ký tự chứa từ khoá chính (tên văn bản/chủ đề, vd \"Thuế TNCN 2026\") + 1 emoji; tiếp theo 3 ý chính dạng gạch đầu dòng có emoji (✅/📌/⚠️), mỗi ý ≤ 90 ký tự, lồng tự nhiên 2–3 từ khoá phụ mà doanh nghiệp hay tìm (vd: kế toán, quyết toán thuế, hạn nộp, mức phạt); 1 dòng hạn/mốc thời gian nếu có; 1 câu kêu gọi: \"Lưu lại & theo dõi THT để cập nhật luật mới mỗi tuần\" và \"Cần tư vấn: 0901 144 078\"; dòng cuối 5–7 hashtag không dấu: 2–3 hashtag rộng (#thue #ketoan #doanhnghiep), 2–3 hashtag theo chủ đề văn bản, và #THT #KiemToanTuVanTHT. Không dùng hashtag rác (#fyp #xuhuong)."
   },
   "youtube_title": {
    "type": "string",
