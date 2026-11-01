@@ -1,0 +1,42 @@
+name: fetch-music
+# Chạy tay 1 lần (Actions → fetch-music → Run workflow) để tải nhạc nền miễn phí vào thư mục music/
+# Nguồn: Mixkit (mixkit.co) – Stock Music Free License: dùng được trong video, kể cả thương mại, không cần ghi công.
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tải 10 bài nhạc
+        run: |
+          cd music
+          while read -r name id title; do
+            [ -z "$name" ] && continue
+            curl -fsSL -A "Mozilla/5.0" -o "$name.mp3" "https://assets.mixkit.co/music/$id/$id.mp3"
+            echo "$name.mp3 | $title | https://mixkit.co (Free License)" >> NGUON.txt
+            echo "OK $name"
+          done <<'EOF'
+          kich-tinh-epical-drums-01 676 Epical Drums 01
+          kich-tinh-epical-drums-05 680 Epical Drums 05
+          kich-tinh-sports-highlights 51 Sports Highlights
+          hoi-hop-silent-descent 614 Silent Descent
+          hoi-hop-deep-urban 623 Deep Urban
+          du-duong-beautiful-dream 493 Beautiful Dream
+          du-duong-possible-dreams 599 Possible Dreams
+          du-duong-skyline 601 Skyline
+          hien-dai-digital-clouds 175 Digital Clouds
+          hien-dai-driving-ambition 32 Driving Ambition
+          EOF
+          sort -u -o NGUON.txt NGUON.txt
+          ls -la
+      - name: Lưu vào repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add music/
+          git commit -m "Them 10 bai nhac nen Mixkit" || echo "Khong co gi moi"
+          git push
