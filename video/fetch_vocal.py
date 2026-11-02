@@ -17,8 +17,10 @@ DIR = ROOT / "music" / "vocal"
 CREDITS = DIR / "credits.json"
 USED = DIR / "used_ids.txt"
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 10
+# ccMixter chép toàn bộ kết quả vào header X-JSON -> phải lấy từng trang nhỏ (4 bài) để header không quá dài.
 API = ("https://ccmixter.org/api/query?f=json&tags=female_vocals,male_vocals&type=any"
-       "&lic=by&sort=rank&ord=desc&limit=400")
+       "&lic=by&sort=rank&ord=desc&limit=4&offset={}")
+MAX_SCAN = 200  # xét tối đa 200 bài xếp hạng cao nhất
 # Bỏ bài không hợp với hình ảnh công ty kiểm toán
 BAD = re.compile(r"(sexy|explicit|nsfw|profan|drug|horror|death|metal|industrial|noise|scream|gore|occult)", re.I)
 UA = {"User-Agent": "Mozilla/5.0 (THT ban tin - monthly music fetch)"}
@@ -53,12 +55,23 @@ def main_mix(item):
     return None
 
 
+def candidates():
+    for off in range(0, MAX_SCAN, 4):
+        try:
+            page = json.loads(get(API.format(off)))
+        except Exception as e:
+            print(f"Bỏ qua trang {off}: {e}")
+            continue
+        if not page:
+            return
+        yield from page
+
+
 def main():
     DIR.mkdir(parents=True, exist_ok=True)
     used = set(USED.read_text().split()) if USED.exists() else set()
-    items = json.loads(get(API))
     picked = []
-    for it in items:
+    for it in candidates():
         uid = str(it.get("upload_id"))
         ex = it.get("upload_extra") or {}
         tags = f"{ex.get('usertags', '')},{it.get('upload_name', '')}"
