@@ -1,4 +1,4 @@
-// 4 bản Word cho mỗi bản tin: Tiếng Việt · Anh–Việt · Trung giản thể–Việt · Trung phồn thể–Việt.
+// Thư tư vấn cho mỗi bản tin: chỉ text, hoặc Word VI · VI–EN · VI–ZH phồn thể · VI–ZH giản thể (chọn bằng nút).
 // Claude soạn bài 1 lần, trả về từng đoạn đủ 4 ngôn ngữ (để bảng song ngữ khớp từng dòng), rồi dựng .docx.
 import { claude, modelFor, sourceBlocks } from "./claude.js";
 import { readBuffer } from "./extract.js";
@@ -35,13 +35,13 @@ const ARTICLE_SCHEMA = {
       },
     },
     closing: { ...L4, description: "Khuyến nghị của THT + lời mời liên hệ, 2–3 câu" },
-    message_vi: { type: "string", description: "Tin nhắn Telegram tiếng Việt ngắn gọn (≤ 400 ký tự, không hashtag, không emoji dồn dập): bản tin về gì, điểm chính, hạn nếu có. Dùng để gửi kèm 4 file Word." },
+    message_vi: { type: "string", description: "Tin nhắn Telegram tiếng Việt ngắn gọn (≤ 400 ký tự, không hashtag, không emoji dồn dập): bản tin về gì, điểm chính, hạn nếu có. Dùng để gửi kèm thư tư vấn." },
   },
   required: ["title", "summary", "sections", "closing", "message_vi"],
 };
 
 const SYSTEM = `Bạn là biên tập viên kiêm biên dịch viên pháp lý của Công ty TNHH Kiểm toán và Tư vấn THT (thtaudit.com.vn).
-Nhiệm vụ: từ văn bản nguồn và nội dung poster đã duyệt, viết BẢN TIN THUẾ – LUẬT dạng văn bản Word gửi khách hàng doanh nghiệp, đồng thời dịch từng đoạn sang tiếng Anh, tiếng Trung giản thể và tiếng Trung phồn thể. Gọi công cụ \`bulletin_article\` đúng một lần.
+Nhiệm vụ: từ văn bản nguồn và nội dung poster đã duyệt, viết THƯ TƯ VẤN (bản tin Thuế – Luật) dạng văn bản Word gửi khách hàng doanh nghiệp, đồng thời dịch từng đoạn sang tiếng Anh, tiếng Trung giản thể và tiếng Trung phồn thể. Gọi công cụ \`bulletin_article\` đúng một lần.
 
 Nguyên tắc:
 - Nội dung bám sát poster đã duyệt (số liệu, số hiệu, ngày tháng, mức phạt phải khớp), có thể diễn giải đầy đủ hơn poster. Không bịa thông tin; chỗ chưa chắc ghi "[cần bổ sung]".
@@ -76,34 +76,79 @@ async function writeArticle(env, job) {
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-export async function sendWordSet(env, job) {
-  if (!job.content) throw new Error("Chưa có nội dung poster");
+// Các lựa chọn "Thư tư vấn" (nút trên Telegram)
+export const LETTER_KINDS = {
+  text: "📝 Chỉ text",
+  VI: "Word VI",
+  "VI-EN": "Word VI–EN",
+  "VI-ZHT": "Word VI–ZH phồn thể",
+  "VI-ZHS": "Word VI–ZH giản thể",
+  all: "📦 Tất cả",
+};
+
+async function hashOf(obj) {
+  const d = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(JSON.stringify(obj)));
+  return [...new Uint8Array(d)].slice(0, 6).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Soạn bài 1 lần cho mỗi phiên bản nội dung poster, lưu R2 để các lần bấm sau dùng lại (không tốn thêm phí Claude).
+async function getArticle(env, job) {
+  const key = `jobs/${job.id}/article-${await hashOf(job.content)}.json`;
+  const cached = await env.FILES.get(key);
+  if (cached) return JSON.parse(await cached.text());
   const article = await writeArticle(env, job);
-  await env.FILES.put(`jobs/${job.id}/article.json`, JSON.stringify(article), { httpMetadata: { contentType: "application/json; charset=utf-8" } });
+  await env.FILES.put(key, JSON.stringify(article), { httpMetadata: { contentType: "application/json; charset=utf-8" } });
+  return article;
+}
+
+function articleText(a) {
+  const out = [a.title.vi.toUpperCase(), "", a.summary.vi];
+  for (const s of a.sections) out.push("", s.heading.vi.toUpperCase(), ...s.paragraphs.map((p) => p.vi));
+  out.push("", a.closing.vi);
+  return out.join("\n");
+}
+
+async function sendLong(env, chat, text) {
+  for (let i = 0; i < text.length; i += 3900) await send(env, chat, text.slice(i, i + 3900));
+}
+
+export async function sendLetter(env, job, kind = "all") {
+  if (!job.content) throw new Error("Chưa có nội dung poster");
+  const article = await getArticle(env, job);
+  await send(env, job.chat_id, article.message_vi || job.content.issuer_sentence || "Thư tư vấn THT");
+  if (kind === "text" || kind === "all") await sendLong(env, job.chat_id, articleText(article));
+  if (kind === "text") return;
 
   const d = new Date(Date.now() + 7 * 3600e3);
   const meta = {
-    brand: { ...brandOf(env), address: env.THT_ADDRESS || "" },
+    brand: brandOf(env),
     docRef: job.content.doc_ref || "",
     date: `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`,
   };
-  const slug = (job.content.slug || job.content.topic_short || job.id).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d")
+  const slug = (job.content.slug || job.content.topic_short || job.id).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d")
     .replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || job.id;
+  const variants = VARIANTS.filter((v) => kind === "all" || v.key === kind);
+  if (!variants.length) throw new Error(`Không có loại thư ${kind}`);
 
+  const docs = [];
+  for (const v of variants) {
+    const bytes = buildDocx(article, v.langs, meta);
+    const name = `ThuTuVan-THT_${slug}_${v.key}.docx`;
+    await env.FILES.put(`jobs/${job.id}/${name}`, bytes, { httpMetadata: { contentType: DOCX_MIME } });
+    docs.push({ name, bytes, label: v.label });
+  }
   const form = new FormData();
   form.append("chat_id", String(job.chat_id));
-  const media = [];
-  for (const [i, v] of VARIANTS.entries()) {
-    const bytes = buildDocx(article, v.langs, meta);
-    const name = `BanTin-THT_${slug}_${v.key}.docx`;
-    await env.FILES.put(`jobs/${job.id}/${name}`, bytes, { httpMetadata: { contentType: DOCX_MIME } });
-    form.append(`d${i}`, new Blob([bytes], { type: DOCX_MIME }), name);
-    media.push({ type: "document", media: `attach://d${i}` });
+  if (docs.length === 1) {
+    form.append("document", new Blob([docs[0].bytes], { type: DOCX_MIME }), docs[0].name);
+    form.append("caption", "📄 " + docs[0].label);
+    const r = await tgForm(env, "sendDocument", form);
+    if (!r.ok) throw new Error(`Telegram không nhận file Word: ${r.description}`);
+    return;
   }
-  media[media.length - 1].caption = "📄 " + VARIANTS.map((v) => v.label).join(" · ");
+  const media = docs.map((x, i) => { form.append(`d${i}`, new Blob([x.bytes], { type: DOCX_MIME }), x.name); return { type: "document", media: `attach://d${i}` }; });
+  media[media.length - 1].caption = "📄 " + docs.map((x) => x.label).join(" · ");
   form.append("media", JSON.stringify(media));
-
-  await send(env, job.chat_id, article.message_vi || job.content.issuer_sentence || "Bản tin Thuế – Luật THT");
   const r = await tgForm(env, "sendMediaGroup", form);
   if (!r.ok) throw new Error(`Telegram không nhận file Word: ${r.description}`);
 }

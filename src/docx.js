@@ -111,16 +111,17 @@ const LABELS = {
 
 export const VARIANTS = [
   { key: "VI", langs: ["vi"], label: "Tiếng Việt" },
-  { key: "EN-VI", langs: ["en", "vi"], label: "Song ngữ Anh – Việt" },
-  { key: "ZHS-VI", langs: ["zh_hans", "vi"], label: "Song ngữ Trung (giản thể) – Việt" },
-  { key: "ZHT-VI", langs: ["zh_hant", "vi"], label: "Song ngữ Trung (phồn thể) – Việt" },
+  { key: "VI-EN", langs: ["vi", "en"], label: "Song ngữ Việt – Anh" },
+  { key: "VI-ZHT", langs: ["vi", "zh_hant"], label: "Song ngữ Việt – Trung phồn thể" },
+  { key: "VI-ZHS", langs: ["vi", "zh_hans"], label: "Song ngữ Việt – Trung giản thể" },
 ];
 
 // article: {title, summary, sections:[{heading, paragraphs:[]}], closing} – every text is {vi,en,zh_hans,zh_hant}
 // meta: {brand:{phone,emails,website,address}, docRef, date}
 export function buildDocx(article, langs, meta) {
-  const [L1, L2] = langs; // L2 = "vi" for bilingual
-  const bi = Boolean(L2);
+  const bi = langs.length > 1;
+  const L1 = langs.find((l) => l !== "vi") || "vi"; // foreign language (bilingual)
+  const [LEFT, RIGHT] = langs; // column order, e.g. ["vi", "en"]
   const W = 9638, half = W / 2;
   const brand = meta.brand;
   const body = [];
@@ -128,15 +129,15 @@ export function buildDocx(article, langs, meta) {
   // Company header
   body.push(para(run("CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT", { b: true, color: NAVY, sz: 26, lang: "vi" }), { align: "center", after: 0 }));
   body.push(para(run("THT Auditing & Consulting Co., Ltd.", { i: true, color: GREY, sz: 20, lang: "en" }), { align: "center", after: 0 }));
-  if (brand.address) body.push(para(run(brand.address, { color: GREY, sz: 18, lang: "vi" }), { align: "center", after: 0 }));
+  for (const off of brand.offices || []) body.push(para(run(off, { color: GREY, sz: 18, lang: "vi" }), { align: "center", after: 0 }));
   body.push(para(run(`ĐT: ${brand.phone}  ·  Email: ${brand.emails.join(" · ")}  ·  ${brand.website}`, { color: GREY, sz: 18, lang: "vi" }), { align: "center", after: 200, border: true }));
 
   // Bulletin label + title
-  const label = bi ? `${LABELS[L1].bulletin}  |  ${LABELS.vi.bulletin}` : LABELS.vi.bulletin;
+  const label = bi ? `${LABELS[LEFT].bulletin}  |  ${LABELS[RIGHT].bulletin}` : LABELS.vi.bulletin;
   body.push(para(run(label, { b: true, color: GREY, sz: 20 }), { align: "center", before: 120, after: 60 }));
   for (const l of langs) body.push(para(run(article.title[l], { b: true, color: NAVY, sz: 30, lang: l }), { align: "center", after: 60 }));
   const refLine = (l) => `${LABELS[l].ref}: ${meta.docRef || "—"}   ·   ${LABELS[l].date}: ${meta.date}`;
-  body.push(para(run(bi ? `${refLine(L1)}\n${refLine("vi")}` : refLine("vi"), { i: true, color: GREY, sz: 20 }), { align: "center", after: 240 }));
+  body.push(para(run(bi ? `${refLine(LEFT)}\n${refLine(RIGHT)}` : refLine("vi"), { i: true, color: GREY, sz: 20 }), { align: "center", after: 240 }));
 
   if (!bi) {
     body.push(textPara(article.summary.vi, "vi", { run: { i: true } }));
@@ -147,23 +148,24 @@ export function buildDocx(article, langs, meta) {
     body.push(para(run(article.closing.vi, { lang: "vi" }), { before: 200, shade: "EEF2F8" }));
   } else {
     const row = (l, r, o = {}) => `<w:tr>${o.keep ? "<w:trPr><w:cantSplit/></w:trPr>" : ""}${cell(l, half, o.shade)}${cell(r, half, o.shade)}</w:tr>`;
+    const pair = (f, o) => row(f(LEFT, o), f(RIGHT, o), o);
     const rows = [];
-    const hd = (l) => para(run(l === "vi" ? "Tiếng Việt" : { en: "English", zh_hans: "中文（简体）", zh_hant: "中文（繁體）" }[l], { b: true, color: "FFFFFF", sz: 20, lang: l }), { align: "center", after: 0 });
-    rows.push(`<w:tr><w:trPr><w:tblHeader/></w:trPr>${cell(hd(L1), half, NAVY)}${cell(hd("vi"), half, NAVY)}</w:tr>`);
-    rows.push(row(textPara(article.summary[L1], L1, { run: { i: true } }), textPara(article.summary.vi, "vi", { run: { i: true } })));
+    const NAMES = { vi: "Tiếng Việt", en: "English", zh_hans: "中文（简体）", zh_hant: "中文（繁體）" };
+    const hd = (l) => para(run(NAMES[l], { b: true, color: "FFFFFF", sz: 20, lang: l }), { align: "center", after: 0 });
+    rows.push(`<w:tr><w:trPr><w:tblHeader/></w:trPr>${cell(hd(LEFT), half, NAVY)}${cell(hd(RIGHT), half, NAVY)}</w:tr>`);
+    rows.push(pair((l) => textPara(article.summary[l], l, { run: { i: true } })));
     for (const s of article.sections) {
-      const h = (l) => para(run(s.heading[l], { b: true, color: NAVY, lang: l }), { after: 40 });
-      rows.push(row(h(L1), h("vi"), { shade: "EEF2F8", keep: true }));
-      for (const p of s.paragraphs) rows.push(row(textPara(p[L1], L1), textPara(p.vi, "vi")));
+      rows.push(pair((l) => para(run(s.heading[l], { b: true, color: NAVY, lang: l }), { after: 40 }), { shade: "EEF2F8", keep: true }));
+      for (const p of s.paragraphs) rows.push(pair((l) => textPara(p[l], l)));
     }
-    rows.push(row(textPara(article.closing[L1], L1), textPara(article.closing.vi, "vi"), { shade: "EEF2F8" }));
+    rows.push(pair((l) => textPara(article.closing[l], l), { shade: "EEF2F8" }));
     body.push(table(rows, [half, half]));
   }
 
   // Contact + disclaimer
   const contact = (l) => `${LABELS[l].contact}: ${brand.phone} · ${brand.emails.join(" · ")} · ${brand.website}`;
-  body.push(para(run(bi ? `${contact(L1)}\n${contact("vi")}` : contact("vi"), { b: true, color: NAVY, sz: 20 }), { before: 240, after: 60, align: "left" }));
-  body.push(para(run(bi ? `${LABELS[L1].disclaimer}\n${LABELS.vi.disclaimer}` : LABELS.vi.disclaimer, { i: true, color: GREY, sz: 18 }), { after: 0, align: "left" }));
+  body.push(para(run(bi ? `${contact(LEFT)}\n${contact(RIGHT)}` : contact("vi"), { b: true, color: NAVY, sz: 20 }), { before: 240, after: 60, align: "left" }));
+  body.push(para(run(bi ? `${LABELS[LEFT].disclaimer}\n${LABELS[RIGHT].disclaimer}` : LABELS.vi.disclaimer, { i: true, color: GREY, sz: 18 }), { after: 0, align: "left" }));
 
   const sect = `<w:sectPr><w:footerReference w:type="default" r:id="rIdF"/><w:pgSz w:w="11906" w:h="16838"/>` +
     `<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>`;

@@ -5,7 +5,7 @@ import { readBuffer } from "./extract.js";
 import { renderJob, STYLE_NAMES } from "./render.js";
 import { postToPage } from "./facebook.js";
 import { tg, send, keyboard, download, sendAlbum, sendVideo } from "./telegram.js";
-import { sendWordSet } from "./word.js";
+import { sendLetter, LETTER_KINDS } from "./word.js";
 
 const now = () => new Date().toISOString();
 const URL_RE = /https?:\/\/\S+/;
@@ -47,8 +47,12 @@ const reviewKb = (id) => keyboard([
   [["📘 FB bài viết", `pub:${id}:fb`], ["📱 FB Story (nhạc)", `pub:${id}:story`]],
   [["🎵 TikTok", `pub:${id}:tiktok`], ["▶️ YouTube Shorts", `pub:${id}:youtube`]],
   [["✏️ Sửa", `ed:${id}`], ["🎨 Đổi mẫu", `rs:${id}`], ["🧠 Soạn kỹ (Sonnet)", `hq:${id}`]],
-  [["📄 Word 4 bản", `wd:${id}`], ["❌ Huỷ", `x:${id}`]],
+  [["✉️ Thư tư vấn", `lm:${id}`], ["❌ Huỷ", `x:${id}`]],
 ]);
+const letterKb = (id) => {
+  const b = (k) => [LETTER_KINDS[k], `lt:${id}:${k}`];
+  return keyboard([[b("text"), b("VI")], [b("VI-EN"), b("VI-ZHT")], [b("VI-ZHS"), b("all")]]);
+};
 
 const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 const allowed = (env, uid) => list(env.TG_ALLOWED_IDS).includes(String(uid));
@@ -80,7 +84,7 @@ export async function handleUpdate(update, env) {
   }
   if (cmd === "/start" || cmd === "/help") {
     return send(env, chat, "Gửi văn bản mới (Word, Excel, PDF hoặc ảnh chụp). Em soạn bản tin, anh chọn mẫu và số trang, xem trước rồi bấm đăng. " +
-      "Có poster xong em tự soạn thêm 4 bản Word: Tiếng Việt · Anh–Việt · Trung giản thể–Việt · Trung phồn thể–Việt.\n" +
+      "Có poster xong, bấm chọn Thư tư vấn: chỉ text, Word VI, VI–EN, VI–ZH phồn thể, VI–ZH giản thể hoặc tất cả.\n" +
       "• Chú thích kèm file = ghi chú cho em. Có đường link trong chú thích → mã QR trỏ tới link đó.\n" +
       (group ? "• Trong nhóm: gõ /moi rồi gửi file, hoặc gửi file kèm chú thích /bantin. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
       `Lệnh: /moi bài mới · /bantin (nhóm) · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
@@ -163,7 +167,12 @@ async function onButton(q, env) {
   if (act === "rs") return send(env, chat, "Chọn mẫu khác:", styleKb(id));
   if (act === "ed") { await kvSet(env, editKey(chat, uid), id); return send(env, chat, "Anh nhắn yêu cầu sửa (vd: “đổi tiêu đề thành…”, “gộp còn 1 trang”, “thêm thời hạn 30 ngày”)."); }
   if (act === "hq") { await clearKb(); job.quality = "strong"; await saveJob(env, job); await send(env, chat, "Đang soạn lại bằng Claude Sonnet (kỹ hơn, chi phí cao hơn)…"); return env.JOBS.send({ type: "generate", jobId: id }); }
-  if (act === "wd") { await send(env, chat, "📄 Đang soạn lại 4 bản Word…"); return env.JOBS.send({ type: "word", jobId: id }); }
+  if (act === "lm") return send(env, chat, "✉️ Thư tư vấn – chọn dạng:", letterKb(id));
+  if (act === "lt") {
+    if (!LETTER_KINDS[arg]) return;
+    await send(env, chat, `✉️ Đang soạn thư tư vấn: ${LETTER_KINDS[arg]}…`);
+    return env.JOBS.send({ type: "word", jobId: id, kind: arg });
+  }
   if (act === "x") { await clearKb(); job.status = "cancelled"; await saveJob(env, job); return send(env, chat, "Đã huỷ bài này."); }
   if (act === "pub") { await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: arg.split(",") }); }
 }
@@ -173,10 +182,10 @@ export async function processTask(task, env) {
   const job = await getJob(env, task.jobId);
   if (!job) return;
   try {
-    if (task.type === "generate") { await generate(env, job); await queueWord(env, job); }
+    if (task.type === "generate") { await generate(env, job); await offerLetter(env, job); }
     else if (task.type === "render") await renderAndPreview(env, job);
-    else if (task.type === "revise") { job.content = await reviseContent(env, job.content, task.instruction, job.quality); await saveJob(env, job); await renderAndPreview(env, job); await queueWord(env, job); }
-    else if (task.type === "word") await sendWordSet(env, job);
+    else if (task.type === "revise") { job.content = await reviseContent(env, job.content, task.instruction, job.quality); await saveJob(env, job); await renderAndPreview(env, job); await offerLetter(env, job); }
+    else if (task.type === "word") await sendLetter(env, job, task.kind || "all");
     else if (task.type === "publish") await publish(env, job, task.targets);
   } catch (e) {
     console.error(e);
@@ -185,11 +194,12 @@ export async function processTask(task, env) {
 }
 const reviewKbIfReady = (job) => (job.content ? reviewKb(job.id) : {});
 
-// Sau khi có poster: tự soạn 4 bản Word ở một tác vụ riêng (WORD_AUTO = "0" để tắt).
-async function queueWord(env, job) {
-  if (env.WORD_AUTO === "0" || !job.content) return;
-  await send(env, job.chat_id, "📄 Đang soạn 4 bản Word (Việt · Anh–Việt · Trung giản–Việt · Trung phồn–Việt)…");
-  await env.JOBS.send({ type: "word", jobId: job.id });
+// Sau khi có poster: hỏi dạng thư tư vấn (LETTER_AUTO = "all" | "VI" | ... để tự gửi luôn không cần bấm).
+async function offerLetter(env, job) {
+  if (!job.content) return;
+  const auto = env.LETTER_AUTO || "";
+  if (LETTER_KINDS[auto]) { await send(env, job.chat_id, `✉️ Đang soạn thư tư vấn: ${LETTER_KINDS[auto]}…`); return env.JOBS.send({ type: "word", jobId: job.id, kind: auto }); }
+  await send(env, job.chat_id, "✉️ Thư tư vấn gửi khách – chọn dạng:", letterKb(job.id));
 }
 
 async function generate(env, job) {

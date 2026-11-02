@@ -9,6 +9,7 @@ export const brandOf = (env) => ({
   phone: env.THT_PHONE || "0901 144 078",
   emails: (env.THT_EMAILS || "tht@thtaudit.com.vn,danang@thtaudit.com.vn").split(",").map((s) => s.trim()),
   website: env.THT_WEBSITE || "thtaudit.com.vn",
+  offices: (env.THT_OFFICES || "Trụ sở TP.HCM: 25 Hoàng Hoa Thám, P. Gia Định · (028) 3517 8796|Chi nhánh Đà Nẵng: 312 Lê Đại Hành, P. Cẩm Lệ · 0901 144 078").split("|").map((s) => s.trim()).filter(Boolean),
 });
 
 function opts(env, qrUrl) {
