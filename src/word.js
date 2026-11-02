@@ -3,7 +3,6 @@
 import { claude, modelFor, sourceBlocks } from "./claude.js";
 import { readBuffer } from "./extract.js";
 import { download, send, tgForm } from "./telegram.js";
-import { brandOf } from "./render.js";
 import { buildDocx, VARIANTS } from "./docx.js";
 
 const L4 = {
@@ -34,7 +33,7 @@ const ARTICLE_SCHEMA = {
         required: ["heading", "paragraphs"],
       },
     },
-    closing: { ...L4, description: "Khuyến nghị của THT + lời mời liên hệ, 2–3 câu" },
+    closing: { ...L4, description: "THT sẵn sàng hỗ trợ + hotline 0901 144 078, 1–2 câu" },
     message_vi: { type: "string", description: "Tin nhắn Telegram tiếng Việt ngắn gọn (≤ 400 ký tự, không hashtag, không emoji dồn dập): bản tin về gì, điểm chính, hạn nếu có. Dùng để gửi kèm thư tư vấn." },
   },
   required: ["title", "summary", "sections", "closing", "message_vi"],
@@ -51,7 +50,9 @@ Nguyên tắc:
 - Trung giản thể: dùng thuật ngữ đại lục (企业所得税, 增值税, 电子发票, 税务机关...).
 - Trung phồn thể: chữ phồn thể và cách dùng từ Đài Loan (營利事業所得稅/企業所得稅, 營業稅/加值稅 khi phù hợp, 電子發票, 稅務機關...), không chỉ chuyển mã chữ.
 - Tên văn bản pháp luật Việt Nam: lần đầu xuất hiện trong bản dịch ghi tên dịch kèm số hiệu gốc, ví dụ "Decree No. 70/2025/ND-CP", "第70/2025/ND-CP号议定". Giữ nguyên số hiệu, ngày dạng dd/mm/yyyy, số tiền kèm "VND"/"越南盾".
-- Không đưa số điện thoại/email vào các đoạn (mẫu Word tự chèn).`;
+- Không viết "Kính gửi", lời chào mở đầu, lời chúc cuối thư, "Trân trọng" hay chữ ký – mẫu thư tự chèn.
+- \`summary\`: đoạn dẫn nêu văn bản nào, ai ban hành, ngày nào, điều chỉnh gì. Các mục dùng tiêu đề ngắn như "Nội dung chính", "Doanh nghiệp cần lưu ý thực hiện", "Thời hạn / hiệu lực", "Căn cứ pháp lý"; ý liệt kê bắt đầu bằng "• ".
+- \`closing\`: 1–2 câu THT sẵn sàng hỗ trợ việc cụ thể + "Vui lòng liên hệ hotline 0901 144 078." (dịch tương ứng).`;
 
 async function writeArticle(env, job) {
   const parts = [];
@@ -121,9 +122,9 @@ export async function sendLetter(env, job, kind = "all") {
 
   const d = new Date(Date.now() + 7 * 3600e3);
   const meta = {
-    brand: brandOf(env),
+    place: env.LETTER_PLACE || "TP. Hồ Chí Minh",
     docRef: job.content.doc_ref || "",
-    date: `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`,
+    date: { d: String(d.getUTCDate()).padStart(2, "0"), m: String(d.getUTCMonth() + 1).padStart(2, "0"), y: d.getUTCFullYear() },
   };
   const slug = (job.content.slug || job.content.topic_short || job.id).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d")
     .replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || job.id;

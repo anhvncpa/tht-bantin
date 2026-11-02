@@ -1,5 +1,7 @@
 // Minimal .docx builder (no dependencies): WordprocessingML + a stored (uncompressed) ZIP.
-// Builds the bulletin as 1 Vietnamese document or a 2-column bilingual table (foreign | Vietnamese).
+// Thư tư vấn dựng trên letterhead v4.1: bản tiếng Việt, hoặc bảng song ngữ 2 cột (Việt | ngoại ngữ).
+
+import { LH_PARTS, LH_DOC_HEAD, LH_SECT } from "./letterhead.js";
 
 const enc = new TextEncoder();
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -46,67 +48,72 @@ export function zip(files) {
   return out;
 }
 
-// ---------------- WordprocessingML helpers ----------------
-const LANG = {
-  vi: { lang: "vi-VN", east: "zh-CN", font: "SimSun" },
-  en: { lang: "en-US", east: "zh-CN", font: "SimSun" },
-  zh_hans: { lang: "zh-CN", east: "zh-CN", font: "SimSun" },
-  zh_hant: { lang: "zh-TW", east: "zh-TW", font: "PMingLiU" },
-};
+// ---------------- Thư tư vấn theo letterhead v4.1 ----------------
 
-const NAVY = "1F3864", GREY = "595959";
+const RED = "E1262B", INK = "222A35", GREY = "595959", SOFT = "F2F4F7";
+const EAST = { vi: "Arial", en: "Arial", zh_hans: "Microsoft YaHei", zh_hant: "Microsoft JhengHei" };
+const LANGTAG = { vi: "vi-VN", en: "en-US", zh_hans: "zh-CN", zh_hant: "zh-TW" };
 
 function run(text, o = {}) {
-  const pr = [
-    o.b ? "<w:b/><w:bCs/>" : "",
-    o.i ? "<w:i/><w:iCs/>" : "",
-    o.color ? `<w:color w:val="${o.color}"/>` : "",
-    o.sz ? `<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>` : "",
-    o.lang ? `<w:lang w:val="${LANG[o.lang].lang}" w:eastAsia="${LANG[o.lang].east}"/>` : "",
-  ].join("");
-  const parts = String(text ?? "").split("\n");
-  const body = parts.map((t, i) => (i ? "<w:br/>" : "") + `<w:t xml:space="preserve">${esc(t)}</w:t>`).join("");
-  return `<w:r>${pr ? `<w:rPr>${pr}</w:rPr>` : ""}${body}</w:r>`;
+  const l = o.lang || "vi";
+  const pr = `<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:eastAsia="${EAST[l]}"/>` +
+    (o.b ? "<w:b/><w:bCs/>" : "") + (o.i ? "<w:i/><w:iCs/>" : "") +
+    `<w:color w:val="${o.color || "000000"}"/><w:sz w:val="${o.sz || 21}"/><w:szCs w:val="${o.sz || 21}"/>` +
+    `<w:lang w:val="${LANGTAG[l]}" w:eastAsia="${LANGTAG[l].startsWith("zh") ? LANGTAG[l] : "zh-CN"}"/></w:rPr>`;
+  if (o.tab) return `<w:r>${pr}<w:tab/></w:r>`;
+  const body = String(text ?? "").split("\n").map((t, i) => (i ? "<w:br/>" : "") + `<w:t xml:space="preserve">${esc(t)}</w:t>`).join("");
+  return `<w:r>${pr}${body}</w:r>`;
 }
 
 function para(runs, o = {}) {
-  const pr = [
-    o.keep ? "<w:keepNext/>" : "",
-    o.border ? `<w:pBdr><w:bottom w:val="single" w:sz="8" w:space="4" w:color="${NAVY}"/></w:pBdr>` : "",
-    o.shade ? `<w:shd w:val="clear" w:color="auto" w:fill="${o.shade}"/>` : "",
-    `<w:spacing w:before="${o.before ?? 0}" w:after="${o.after ?? 120}"/>`,
-    o.indent ? `<w:ind w:left="${o.indent}" w:hanging="${o.hanging || 0}"/>` : "",
-    `<w:jc w:val="${o.align || "both"}"/>`,
-  ].join("");
+  const pr = (o.keep ? "<w:keepNext/>" : "") +
+    (o.tabs ? `<w:tabs>${o.tabs}</w:tabs>` : "") +
+    `<w:spacing w:before="${o.before ?? 0}" w:after="${o.after ?? 100}" w:line="288" w:lineRule="auto"/>` +
+    `<w:ind w:left="${o.left || 0}" w:right="${o.right || 0}" w:hanging="${o.hanging || 0}" w:firstLine="0"/>` +
+    `<w:jc w:val="${o.align || "both"}"/>`;
   return `<w:p><w:pPr>${pr}</w:pPr>${Array.isArray(runs) ? runs.join("") : runs}</w:p>`;
 }
 
-// Paragraph text: lines starting with "•" / "-" become hanging-indent bullets.
+// Đoạn thường hoặc gạch đầu dòng (chấm đỏ như mẫu)
 function textPara(text, lang, o = {}) {
   const t = String(text ?? "").trim();
-  const bullet = /^[•\-–]\s*/.test(t);
-  const align = lang.startsWith("zh") ? "left" : "both";
-  return para(run(bullet ? "•\t" + t.replace(/^[•\-–]\s*/, "") : t, { lang, ...o.run }), bullet ? { indent: 360, hanging: 360, align, ...o } : { align, ...o });
+  const align = o.align || (lang.startsWith("zh") ? "left" : "both");
+  if (/^[•\-–]\s*/.test(t)) {
+    return para([run("•", { b: true, color: RED, lang }), run("", { tab: true, lang }), run(t.replace(/^[•\-–]\s*/, ""), { lang, ...o.run })],
+      { tabs: '<w:tab w:val="left" w:pos="360"/>', left: 360, hanging: 360, after: 70, align });
+  }
+  return para(run(t, { lang, ...o.run }), { align, after: 100, ...o.p });
 }
+const heading = (t, lang) => para(run(t, { b: true, color: INK, lang }), { keep: true, before: 140, after: 60, align: "left" });
 
 const cell = (inner, w, shade) =>
   `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${shade ? `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` : ""}</w:tcPr>${inner}</w:tc>`;
-
 function table(rows, widths) {
-  const grid = widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("");
-  const b = (s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`;
+  const b = (s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="D0D5DD"/>`;
   return `<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((a, c) => a + c, 0)}" w:type="dxa"/><w:tblLayout w:type="fixed"/>` +
     `<w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map(b).join("")}</w:tblBorders>` +
-    `<w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="20" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
-    `<w:tblGrid>${grid}</w:tblGrid>${rows.join("")}</w:tbl>`;
+    `<w:tblCellMar><w:top w:w="50" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="10" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+    `<w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>${rows.join("")}</w:tbl>`;
 }
 
-// ---------------- labels ----------------
-const LABELS = {
-  vi: { bulletin: "BẢN TIN THUẾ – LUẬT", ref: "Văn bản", date: "Ngày phát hành", contact: "Liên hệ tư vấn", disclaimer: "Bản tin mang tính thông tin, không thay thế ý kiến tư vấn cho từng trường hợp cụ thể." },
-  en: { bulletin: "TAX & LEGAL BULLETIN", ref: "Reference", date: "Issued", contact: "Contact us", disclaimer: "This bulletin is for general information only and does not constitute advice for any specific case." },
-  zh_hans: { bulletin: "税务法律快讯", ref: "文件", date: "发布日期", contact: "咨询联系", disclaimer: "本快讯仅供参考，不构成针对具体个案的咨询意见。" },
-  zh_hant: { bulletin: "稅務法律快訊", ref: "文件", date: "發布日期", contact: "諮詢聯繫", disclaimer: "本快訊僅供參考，不構成針對具體個案的諮詢意見。" },
+// ---------------- nhãn cố định 4 ngôn ngữ ----------------
+const L = {
+  vi: { title: "THƯ TƯ VẤN", re: "V/v", to: "Kính gửi: Quý Khách hàng",
+    greet: "Công ty TNHH Kiểm toán và Tư vấn THT trân trọng gửi lời chào và cảm ơn sự tin tưởng của Quý Khách hàng trong thời gian qua.",
+    wish: "Kính chúc Quý Khách hàng sức khỏe và kinh doanh thịnh vượng.", regards: "Trân trọng!",
+    disclaimer: "Thư tư vấn mang tính tham khảo chung, không thay thế ý kiến tư vấn cho từng trường hợp cụ thể.", col: "Tiếng Việt" },
+  en: { title: "ADVISORY LETTER", re: "Re", to: "To: Our Valued Clients",
+    greet: "THT Auditing and Consulting Company Limited sends you our warm regards and thanks you for your continued trust.",
+    wish: "We wish you good health and continued business success.", regards: "Sincerely,",
+    disclaimer: "This advisory letter is for general reference only and does not replace advice for any specific case.", col: "English" },
+  zh_hans: { title: "咨询函", re: "事由", to: "致：尊敬的客户",
+    greet: "THT审计与咨询有限责任公司谨向贵公司致以诚挚的问候，感谢贵公司一直以来的信任与支持。",
+    wish: "顺祝商祺，业务兴隆！", regards: "此致敬礼！",
+    disclaimer: "本咨询函仅供一般参考，不能替代针对具体情况的专业意见。", col: "中文（简体）" },
+  zh_hant: { title: "諮詢函", re: "事由", to: "致：尊敬的客戶",
+    greet: "THT審計與諮詢有限責任公司謹向貴公司致以誠摯的問候，感謝貴公司一直以來的信任與支持。",
+    wish: "順頌商祺，業務興隆！", regards: "此致敬禮！",
+    disclaimer: "本諮詢函僅供一般參考，不能取代針對具體情況的專業意見。", col: "中文（繁體）" },
 };
 
 export const VARIANTS = [
@@ -116,90 +123,61 @@ export const VARIANTS = [
   { key: "VI-ZHS", langs: ["vi", "zh_hans"], label: "Song ngữ Việt – Trung giản thể" },
 ];
 
-// article: {title, summary, sections:[{heading, paragraphs:[]}], closing} – every text is {vi,en,zh_hans,zh_hant}
-// meta: {brand:{phone,emails,website,address}, docRef, date}
+const b64bytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+// article: {title, summary, sections:[{heading, paragraphs:[]}], closing} – mỗi chuỗi là {vi,en,zh_hans,zh_hant}
+// meta: {place, date:{d,m,y}, docRef}
 export function buildDocx(article, langs, meta) {
   const bi = langs.length > 1;
-  const L1 = langs.find((l) => l !== "vi") || "vi"; // foreign language (bilingual)
-  const [LEFT, RIGHT] = langs; // column order, e.g. ["vi", "en"]
-  const W = 9638, half = W / 2;
-  const brand = meta.brand;
+  const [A, B] = langs; // A = "vi" (cột trái), B = ngoại ngữ (cột phải)
+  const W = 9637, half = Math.floor(W / 2);
+  const { d, m, y } = meta.date;
   const body = [];
 
-  // Company header
-  body.push(para(run("CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT", { b: true, color: NAVY, sz: 26, lang: "vi" }), { align: "center", after: 0 }));
-  body.push(para(run("THT Auditing & Consulting Co., Ltd.", { i: true, color: GREY, sz: 20, lang: "en" }), { align: "center", after: 0 }));
-  for (const off of brand.offices || []) body.push(para(run(off, { color: GREY, sz: 18, lang: "vi" }), { align: "center", after: 0 }));
-  body.push(para(run(`ĐT: ${brand.phone}  ·  Email: ${brand.emails.join(" · ")}  ·  ${brand.website}`, { color: GREY, sz: 18, lang: "vi" }), { align: "center", after: 200, border: true }));
+  // Số / nơi, ngày
+  body.push(para([run(`Số: ……/${y}/THT-TV`, { sz: 20 }), run("", { tab: true }), run(`${meta.place || "TP. Hồ Chí Minh"}, ngày ${d} tháng ${m} năm ${y}`, { i: true, sz: 20 })],
+    { tabs: '<w:tab w:val="right" w:pos="9637"/>', after: 280, align: "left" }));
 
-  // Bulletin label + title
-  const label = bi ? `${LABELS[LEFT].bulletin}  |  ${LABELS[RIGHT].bulletin}` : LABELS.vi.bulletin;
-  body.push(para(run(label, { b: true, color: GREY, sz: 20 }), { align: "center", before: 120, after: 60 }));
-  for (const l of langs) body.push(para(run(article.title[l], { b: true, color: NAVY, sz: 30, lang: l }), { align: "center", after: 60 }));
-  const refLine = (l) => `${LABELS[l].ref}: ${meta.docRef || "—"}   ·   ${LABELS[l].date}: ${meta.date}`;
-  body.push(para(run(bi ? `${refLine(LEFT)}\n${refLine(RIGHT)}` : refLine("vi"), { i: true, color: GREY, sz: 20 }), { align: "center", after: 240 }));
+  // Tiêu đề + V/v
+  body.push(para(run(bi ? `${L[A].title} | ${L[B].title}` : L.vi.title, { b: true, color: INK, sz: 30, lang: B || "vi" }), { after: 60, align: "center" }));
+  for (const l of langs) body.push(para(run(`${L[l].re}: ${article.title[l]}`, { b: true, sz: 22, lang: l }), { left: 600, right: 600, after: l === langs[langs.length - 1] ? 280 : 40, align: "center" }));
 
   if (!bi) {
-    body.push(textPara(article.summary.vi, "vi", { run: { i: true } }));
+    body.push(para(run(L.vi.to, { b: true }), { after: 180, align: "left" }));
+    body.push(textPara(L.vi.greet, "vi"));
+    body.push(textPara(article.summary.vi, "vi"));
     for (const s of article.sections) {
-      body.push(para(run(s.heading.vi, { b: true, color: NAVY, sz: 24, lang: "vi" }), { before: 200, after: 80, keep: true }));
+      body.push(heading(s.heading.vi, "vi"));
       for (const p of s.paragraphs) body.push(textPara(p.vi, "vi"));
     }
-    body.push(para(run(article.closing.vi, { lang: "vi" }), { before: 200, shade: "EEF2F8" }));
+    body.push(textPara(article.closing.vi, "vi", { p: { before: 140 } }));
+    body.push(textPara(L.vi.wish, "vi"));
   } else {
-    const row = (l, r, o = {}) => `<w:tr>${o.keep ? "<w:trPr><w:cantSplit/></w:trPr>" : ""}${cell(l, half, o.shade)}${cell(r, half, o.shade)}</w:tr>`;
-    const pair = (f, o) => row(f(LEFT, o), f(RIGHT, o), o);
+    const row = (f, o = {}) => `<w:tr>${o.keep ? "<w:trPr><w:cantSplit/></w:trPr>" : ""}${cell(f(A), half, o.shade)}${cell(f(B), W - half, o.shade)}</w:tr>`;
     const rows = [];
-    const NAMES = { vi: "Tiếng Việt", en: "English", zh_hans: "中文（简体）", zh_hant: "中文（繁體）" };
-    const hd = (l) => para(run(NAMES[l], { b: true, color: "FFFFFF", sz: 20, lang: l }), { align: "center", after: 0 });
-    rows.push(`<w:tr><w:trPr><w:tblHeader/></w:trPr>${cell(hd(LEFT), half, NAVY)}${cell(hd(RIGHT), half, NAVY)}</w:tr>`);
-    rows.push(pair((l) => textPara(article.summary[l], l, { run: { i: true } })));
+    rows.push(`<w:tr><w:trPr><w:tblHeader/></w:trPr>${[A, B].map((l, i) => cell(para(run(L[l].col, { b: true, color: "FFFFFF", sz: 19, lang: l }), { after: 0, align: "center" }), i ? W - half : half, INK)).join("")}</w:tr>`);
+    rows.push(row((l) => para(run(L[l].to, { b: true, lang: l }), { after: 60, align: "left" })));
+    rows.push(row((l) => textPara(L[l].greet, l, { align: "left" })));
+    rows.push(row((l) => textPara(article.summary[l], l, { align: "left" })));
     for (const s of article.sections) {
-      rows.push(pair((l) => para(run(s.heading[l], { b: true, color: NAVY, lang: l }), { after: 40 }), { shade: "EEF2F8", keep: true }));
-      for (const p of s.paragraphs) rows.push(pair((l) => textPara(p[l], l)));
+      rows.push(row((l) => para(run(s.heading[l], { b: true, color: INK, lang: l }), { after: 40, align: "left" }), { shade: SOFT, keep: true }));
+      for (const p of s.paragraphs) rows.push(row((l) => textPara(p[l], l, { align: "left" })));
     }
-    rows.push(pair((l) => textPara(article.closing[l], l), { shade: "EEF2F8" }));
-    body.push(table(rows, [half, half]));
+    rows.push(row((l) => textPara(article.closing[l], l, { align: "left" })));
+    rows.push(row((l) => textPara(L[l].wish, l, { align: "left" })));
+    body.push(table(rows, [half, W - half]));
   }
 
-  // Contact + disclaimer
-  const contact = (l) => `${LABELS[l].contact}: ${brand.phone} · ${brand.emails.join(" · ")} · ${brand.website}`;
-  body.push(para(run(bi ? `${contact(LEFT)}\n${contact(RIGHT)}` : contact("vi"), { b: true, color: NAVY, sz: 20 }), { before: 240, after: 60, align: "left" }));
-  body.push(para(run(bi ? `${LABELS[LEFT].disclaimer}\n${LABELS[RIGHT].disclaimer}` : LABELS.vi.disclaimer, { i: true, color: GREY, sz: 18 }), { after: 0, align: "left" }));
+  // Trân trọng + chữ ký (pháp nhân Việt Nam, giữ tiếng Việt)
+  body.push(para(run(bi ? `${L[A].regards}  /  ${L[B].regards}` : L.vi.regards, { b: true, lang: B || "vi" }), { keep: true, before: bi ? 200 : 100, after: 200, align: "left" }));
+  body.push(para(run("TM. CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT", { b: true, sz: 20 }), { keep: true, left: 4300, after: 0, align: "center" }));
+  body.push(para(run("GIÁM ĐỐC", { b: true, sz: 20 }), { keep: true, left: 4300, after: 1300, align: "center" }));
+  body.push(para(run("…………………………", { sz: 20 }), { keep: true, left: 4300, after: 0, align: "center" }));
+  body.push(para(run(bi ? `${L[A].disclaimer}\n${L[B].disclaimer}` : L.vi.disclaimer, { i: true, color: GREY, sz: 16, lang: B || "vi" }), { before: 400, after: 0, align: "left" }));
 
-  const sect = `<w:sectPr><w:footerReference w:type="default" r:id="rIdF"/><w:pgSz w:w="11906" w:h="16838"/>` +
-    `<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>`;
-  const NS = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`;
-  const xmlHead = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`;
-  const document = `${xmlHead}<w:document ${NS}><w:body>${body.join("")}${sect}</w:body></w:document>`;
-
-  const main = LANG[bi ? L1 : "vi"];
-  const styles = `${xmlHead}<w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr>` +
-    `<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman" w:eastAsia="${main.font}"/>` +
-    `<w:sz w:val="${bi ? 22 : 24}"/><w:szCs w:val="${bi ? 22 : 24}"/><w:lang w:val="vi-VN" w:eastAsia="${main.east}"/></w:rPr></w:rPrDefault>` +
-    `<w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>` +
-    `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`;
-
-  const footer = `${xmlHead}<w:ftr ${NS}>` +
-    para([run(`THT · ${brand.website} · ${brand.phone}    —    `, { color: GREY, sz: 16 }),
-      `<w:r><w:rPr><w:color w:val="${GREY}"/><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>`,
-      `<w:r><w:rPr><w:color w:val="${GREY}"/><w:sz w:val="16"/></w:rPr><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>`,
-      `<w:r><w:rPr><w:color w:val="${GREY}"/><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>`], { align: "center", after: 0 }) +
-    `</w:ftr>`;
-
-  const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-  return zip([
-    { name: "[Content_Types].xml", data: `${xmlHead}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
-      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>` +
-      `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>` +
-      `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>` +
-      `<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>` },
-    { name: "_rels/.rels", data: `${xmlHead}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-      `<Relationship Id="rId1" Type="${R}/officeDocument" Target="word/document.xml"/></Relationships>` },
-    { name: "word/_rels/document.xml.rels", data: `${xmlHead}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-      `<Relationship Id="rIdS" Type="${R}/styles" Target="styles.xml"/><Relationship Id="rIdF" Type="${R}/footer" Target="footer1.xml"/></Relationships>` },
-    { name: "word/document.xml", data: document },
-    { name: "word/styles.xml", data: styles },
-    { name: "word/footer1.xml", data: footer },
-  ]);
+  const document = `${LH_DOC_HEAD}${body.join("")}${LH_SECT}</w:body></w:document>`;
+  const files = [];
+  for (const [name, v] of Object.entries(LH_PARTS)) files.push({ name, data: v.t !== undefined ? v.t : b64bytes(v.b) });
+  files.splice(1, 0, { name: "word/document.xml", data: document });
+  return zip(files);
 }
