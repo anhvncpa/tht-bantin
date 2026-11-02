@@ -3,6 +3,7 @@
 // • Bot Telegram (/tg/*): thả file → chọn mẫu → xem trước → duyệt → đăng FB / Story / TikTok / YouTube
 // • Trang tra cứu công khai (/tc/<tên>)
 import { generateContent, reviseContent } from "./claude.js";
+import { withFbFooter } from "./contact.js";
 import { lookupPage } from "./lookup.js";
 import { postToPage } from "./facebook.js";
 import { brandOf } from "./render.js";
@@ -34,12 +35,15 @@ export default {
             const b = await request.json();
             if (!b.parts?.length) return fail("Chưa có tài liệu");
             const r = await generateContent(env, { parts: b.parts, note: b.note, verify: b.verify !== false, quality: b.quality || "fast", pages: b.pages || "auto" });
+            if (r.content) r.content.facebook_caption = withFbFooter(r.content.facebook_caption);
             return json({ content: r.content, checks: r.checks });
           }
           case "POST /api/revise": {
             const b = await request.json();
             if (!b.content || !b.instruction) return fail("Thiếu nội dung hoặc yêu cầu sửa");
-            return json({ content: await reviseContent(env, b.content, b.instruction, b.quality || "fast") });
+            const rc = await reviseContent(env, b.content, b.instruction, b.quality || "fast");
+            if (rc) rc.facebook_caption = withFbFooter(rc.facebook_caption);
+            return json({ content: rc });
           }
           case "POST /api/lookup": return await saveLookup(await request.json(), env, url);
           case "POST /api/publish": return await publishWeb(await request.json(), env);

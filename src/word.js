@@ -4,6 +4,7 @@ import { claude, modelFor, sourceBlocks } from "./claude.js";
 import { readBuffer } from "./extract.js";
 import { download, send, tgForm } from "./telegram.js";
 import { buildDocx, VARIANTS } from "./docx.js";
+import { LETTER_CLOSING } from "./contact.js";
 
 const L4 = {
   type: "object",
@@ -33,10 +34,9 @@ const ARTICLE_SCHEMA = {
         required: ["heading", "paragraphs"],
       },
     },
-    closing: { ...L4, description: "THT sẵn sàng hỗ trợ + hotline 0901 144 078, 1–2 câu" },
     message_vi: { type: "string", description: "Tin nhắn Telegram tiếng Việt ngắn gọn (≤ 400 ký tự, không hashtag, không emoji dồn dập): bản tin về gì, điểm chính, hạn nếu có. Dùng để gửi kèm thư tư vấn." },
   },
-  required: ["title", "summary", "sections", "closing", "message_vi"],
+  required: ["title", "summary", "sections", "message_vi"],
 };
 
 const SYSTEM = `Bạn là biên tập viên kiêm biên dịch viên pháp lý của Công ty TNHH Kiểm toán và Tư vấn THT (thtaudit.com.vn).
@@ -52,7 +52,7 @@ Nguyên tắc:
 - Tên văn bản pháp luật Việt Nam: lần đầu xuất hiện trong bản dịch ghi tên dịch kèm số hiệu gốc, ví dụ "Decree No. 70/2025/ND-CP", "第70/2025/ND-CP号议定". Giữ nguyên số hiệu, ngày dạng dd/mm/yyyy, số tiền kèm "VND"/"越南盾".
 - Không viết "Kính gửi", lời chào mở đầu, lời chúc cuối thư, "Trân trọng" hay chữ ký – mẫu thư tự chèn.
 - \`summary\`: đoạn dẫn nêu văn bản nào, ai ban hành, ngày nào, điều chỉnh gì. Các mục dùng tiêu đề ngắn như "Nội dung chính", "Doanh nghiệp cần lưu ý thực hiện", "Thời hạn / hiệu lực", "Căn cứ pháp lý"; ý liệt kê bắt đầu bằng "• ".
-- \`closing\`: 1–2 câu THT sẵn sàng hỗ trợ việc cụ thể + "Vui lòng liên hệ hotline 0901 144 078." (dịch tương ứng).`;
+- Không viết lời mời hỗ trợ, số điện thoại hay email – mẫu thư tự chèn câu liên hệ chuẩn của Trụ sở chính TP.HCM và Chi nhánh Đà Nẵng.`;
 
 async function writeArticle(env, job) {
   const parts = [];
@@ -116,6 +116,7 @@ async function sendLong(env, chat, text) {
 export async function sendLetter(env, job, kind = "all") {
   if (!job.content) throw new Error("Chưa có nội dung poster");
   const article = await getArticle(env, job);
+  article.closing = LETTER_CLOSING;
   await send(env, job.chat_id, article.message_vi || job.content.issuer_sentence || "Thư tư vấn THT");
   if (kind === "text" || kind === "all") await sendLong(env, job.chat_id, articleText(article));
   if (kind === "text") return;
