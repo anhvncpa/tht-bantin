@@ -10,7 +10,6 @@ import json
 import re
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,9 +25,9 @@ UA = {"User-Agent": "Mozilla/5.0 (THT ban tin - monthly music fetch)"}
 
 
 def get(url):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=180) as r:
-        return r.read()
+    # Dùng curl: máy chủ ccMixter trả header rất dài, thư viện urllib của Python từ chối.
+    return subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "300", "-A", UA["User-Agent"], url],
+                          check=True, capture_output=True).stdout
 
 
 def slug(s):
