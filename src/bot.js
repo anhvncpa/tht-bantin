@@ -1,9 +1,11 @@
 // Telegram bot: webhook (fast) + queue tasks (slow work) + endpoints used by the GitHub video workflow.
+// Chạy được cả trong chat riêng lẫn nhóm (group/supergroup).
 import { generateContent, reviseContent } from "./claude.js";
 import { readBuffer } from "./extract.js";
 import { renderJob, STYLE_NAMES } from "./render.js";
 import { postToPage } from "./facebook.js";
 import { tg, send, keyboard, download, sendAlbum, sendVideo } from "./telegram.js";
+import { sendWordSet } from "./word.js";
 
 const now = () => new Date().toISOString();
 const URL_RE = /https?:\/\/\S+/;
@@ -45,44 +47,67 @@ const reviewKb = (id) => keyboard([
   [["📘 FB bài viết", `pub:${id}:fb`], ["📱 FB Story (nhạc)", `pub:${id}:story`]],
   [["🎵 TikTok", `pub:${id}:tiktok`], ["▶️ YouTube Shorts", `pub:${id}:youtube`]],
   [["✏️ Sửa", `ed:${id}`], ["🎨 Đổi mẫu", `rs:${id}`], ["🧠 Soạn kỹ (Sonnet)", `hq:${id}`]],
-  [["❌ Huỷ", `x:${id}`]],
+  [["📄 Word 4 bản", `wd:${id}`], ["❌ Huỷ", `x:${id}`]],
 ]);
 
-const allowed = (env, uid) => {
-  const ids = (env.TG_ALLOWED_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  return ids.includes(String(uid));
+const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+const allowed = (env, uid) => list(env.TG_ALLOWED_IDS).includes(String(uid));
+const isGroupChat = (chat) => chat?.type === "group" || chat?.type === "supergroup";
+// TG_ALLOWED_CHATS (tuỳ chọn): ID các nhóm được dùng bot, cách nhau dấu phẩy. Để trống = mọi nhóm (vẫn chỉ người trong TG_ALLOWED_IDS được ra lệnh).
+const chatAllowed = (env, chat) => !isGroupChat(chat) || !list(env.TG_ALLOWED_CHATS).length || list(env.TG_ALLOWED_CHATS).includes(String(chat.id));
+// "/moi@THTBot tham số" → "/moi"
+const commandOf = (text) => {
+  const t = (text || "").trim();
+  return t.startsWith("/") ? t.split(/\s+/)[0].replace(/@\w+$/, "").toLowerCase() : "";
 };
+const editKey = (chat, uid) => `edit:${chat}:${uid}`;
+const armKey = (chat, uid) => `arm:${chat}:${uid}`;
 
 // ---------------- webhook: must answer fast ----------------
 export async function handleUpdate(update, env) {
   if (update.callback_query) return onButton(update.callback_query, env);
   const m = update.message;
   if (!m) return;
-  const chat = m.chat.id;
-  if (!allowed(env, m.from?.id)) {
-    if (m.text === "/start" || m.text === "/id") await send(env, chat, `Bot nội bộ THT. ID Telegram của anh/chị: ${m.from?.id}`);
+  const chat = m.chat.id, uid = m.from?.id;
+  const group = isGroupChat(m.chat);
+  const cmd = commandOf(m.text);
+  const captionCmd = commandOf(m.caption);
+
+  if (cmd === "/id") return send(env, chat, group ? `ID Telegram của anh/chị: ${uid}\nID nhóm này: ${chat}` : `ID Telegram: ${uid}`);
+  if (!allowed(env, uid) || !chatAllowed(env, m.chat)) {
+    if (cmd === "/start" && !group) await send(env, chat, `Bot nội bộ THT. ID Telegram của anh/chị: ${uid}`);
     return;
   }
-  if (m.text === "/start" || m.text === "/help") {
-    return send(env, chat, "Gửi văn bản mới (Word, Excel, PDF hoặc ảnh chụp). Em soạn bản tin, anh chọn mẫu và số trang, xem trước rồi bấm đăng.\n" +
+  if (cmd === "/start" || cmd === "/help") {
+    return send(env, chat, "Gửi văn bản mới (Word, Excel, PDF hoặc ảnh chụp). Em soạn bản tin, anh chọn mẫu và số trang, xem trước rồi bấm đăng. " +
+      "Có poster xong em tự soạn thêm 4 bản Word: Tiếng Việt · Anh–Việt · Trung giản thể–Việt · Trung phồn thể–Việt.\n" +
       "• Chú thích kèm file = ghi chú cho em. Có đường link trong chú thích → mã QR trỏ tới link đó.\n" +
-      `Lệnh: /moi bài mới · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
+      (group ? "• Trong nhóm: gõ /moi rồi gửi file, hoặc gửi file kèm chú thích /bantin. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
+      `Lệnh: /moi bài mới · /bantin (nhóm) · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
   }
-  if (m.text === "/id") return send(env, chat, `ID Telegram: ${m.from.id}`);
-  if (m.text === "/moi") {
+  if (cmd === "/moi" || cmd === "/bantin") {
     await env.DB.prepare("UPDATE jobs SET status='cancelled' WHERE chat_id = ? AND status = 'collecting'").bind(chat).run();
-    await kvDel(env, `edit:${chat}`);
+    await kvDel(env, editKey(chat, uid));
+    if (group) await kvSet(env, armKey(chat, uid), "1");
     return send(env, chat, "OK, gửi file cho bài mới nhé.");
   }
 
   const doc = m.document, photo = m.photo?.[m.photo.length - 1];
   if (doc || photo) {
     let job = await openJob(env, chat);
+    if (group) {
+      // Trong nhóm chỉ nhận file khi: đã gõ /moi (/bantin), chú thích có /bantin, hoặc là ảnh/file cùng album với file đã nhận.
+      const armed = (await kvGet(env, armKey(chat, uid))) !== null;
+      const sameAlbum = job && m.media_group_id && job.media_group === m.media_group_id;
+      if (!armed && captionCmd !== "/bantin" && !sameAlbum) return;
+      if (!armed) await kvSet(env, armKey(chat, uid), "1");
+    }
     if (!job) job = { id: crypto.randomUUID().slice(0, 8), chat_id: chat, status: "collecting", files: [], note: "", created_at: now() };
     job.files.push(doc ? { file_id: doc.file_id, name: doc.file_name || "file", mime: doc.mime_type || "" } : { file_id: photo.file_id, name: `anh${job.files.length + 1}.jpg`, mime: "image/jpeg" });
     if (m.caption) {
-      const u = m.caption.match(URL_RE); if (u) job.qr_url = u[0];
-      job.note = `${job.note} ${m.caption.replace(URL_RE, "")}`.trim();
+      const cap = m.caption.replace(/^\/bantin(@\w+)?/i, "");
+      const u = cap.match(URL_RE); if (u) job.qr_url = u[0];
+      job.note = `${job.note} ${cap.replace(URL_RE, "")}`.trim();
     }
     const sameGroup = m.media_group_id && job.media_group === m.media_group_id;
     job.media_group = m.media_group_id || null;
@@ -91,13 +116,15 @@ export async function handleUpdate(update, env) {
     return;
   }
 
-  if (m.text) {
-    const editing = await kvGet(env, `edit:${chat}`);
+  if (m.text && !cmd) {
+    const editing = await kvGet(env, editKey(chat, uid));
     if (editing) {
-      await kvDel(env, `edit:${chat}`);
+      await kvDel(env, editKey(chat, uid));
       await send(env, chat, "Đang sửa theo yêu cầu…");
       return env.JOBS.send({ type: "revise", jobId: editing, instruction: m.text });
     }
+    // Trong nhóm, tin nhắn thường chỉ là ghi chú khi trả lời (reply) tin của bot – tránh lấy nhầm chuyện trò trong nhóm.
+    if (group && !m.reply_to_message?.from?.is_bot) return;
     const job = await openJob(env, chat);
     if (job) {
       const u = m.text.match(URL_RE); if (u) job.qr_url = u[0];
@@ -105,14 +132,16 @@ export async function handleUpdate(update, env) {
       await saveJob(env, job);
       return send(env, chat, "Đã ghi chú thêm. Chọn mẫu để bắt đầu:", styleKb(job.id));
     }
-    return send(env, chat, "Gửi file văn bản (Word, Excel, PDF, ảnh) để em làm bản tin nhé.");
+    if (!group) return send(env, chat, "Gửi file văn bản (Word, Excel, PDF, ảnh) để em làm bản tin nhé.");
   }
 }
 
 async function onButton(q, env) {
-  const chat = q.message.chat.id;
+  const chat = q.message.chat.id, uid = q.from.id;
+  if (!allowed(env, uid) || !chatAllowed(env, q.message.chat)) {
+    return tg(env, "answerCallbackQuery", { callback_query_id: q.id, text: "Anh/chị chưa được cấp quyền dùng bot này.", show_alert: true });
+  }
   await tg(env, "answerCallbackQuery", { callback_query_id: q.id });
-  if (!allowed(env, q.from.id)) return;
   const [act, id, arg] = q.data.split(":");
   const job = await getJob(env, id);
   if (!job) return send(env, chat, "Bài này không còn, gửi file để làm bài mới.");
@@ -127,12 +156,14 @@ async function onButton(q, env) {
   if (act === "pg") {
     job.pages = arg; job.status = "working";
     await saveJob(env, job);
+    await kvDel(env, armKey(chat, uid));
     await tg(env, "editMessageText", { chat_id: chat, message_id: q.message.message_id, text: `Mẫu ${job.style} · ${arg === "auto" ? "tự động số trang" : arg + " trang"}. Đang đọc văn bản và kiểm chứng (1–2 phút)…` });
     return env.JOBS.send({ type: "generate", jobId: id });
   }
   if (act === "rs") return send(env, chat, "Chọn mẫu khác:", styleKb(id));
-  if (act === "ed") { await kvSet(env, `edit:${chat}`, id); return send(env, chat, "Anh nhắn yêu cầu sửa (vd: “đổi tiêu đề thành…”, “gộp còn 1 trang”, “thêm thời hạn 30 ngày”)."); }
+  if (act === "ed") { await kvSet(env, editKey(chat, uid), id); return send(env, chat, "Anh nhắn yêu cầu sửa (vd: “đổi tiêu đề thành…”, “gộp còn 1 trang”, “thêm thời hạn 30 ngày”)."); }
   if (act === "hq") { await clearKb(); job.quality = "strong"; await saveJob(env, job); await send(env, chat, "Đang soạn lại bằng Claude Sonnet (kỹ hơn, chi phí cao hơn)…"); return env.JOBS.send({ type: "generate", jobId: id }); }
+  if (act === "wd") { await send(env, chat, "📄 Đang soạn lại 4 bản Word…"); return env.JOBS.send({ type: "word", jobId: id }); }
   if (act === "x") { await clearKb(); job.status = "cancelled"; await saveJob(env, job); return send(env, chat, "Đã huỷ bài này."); }
   if (act === "pub") { await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: arg.split(",") }); }
 }
@@ -142,9 +173,10 @@ export async function processTask(task, env) {
   const job = await getJob(env, task.jobId);
   if (!job) return;
   try {
-    if (task.type === "generate") await generate(env, job);
+    if (task.type === "generate") { await generate(env, job); await queueWord(env, job); }
     else if (task.type === "render") await renderAndPreview(env, job);
-    else if (task.type === "revise") { job.content = await reviseContent(env, job.content, task.instruction, job.quality); await saveJob(env, job); await renderAndPreview(env, job); }
+    else if (task.type === "revise") { job.content = await reviseContent(env, job.content, task.instruction, job.quality); await saveJob(env, job); await renderAndPreview(env, job); await queueWord(env, job); }
+    else if (task.type === "word") await sendWordSet(env, job);
     else if (task.type === "publish") await publish(env, job, task.targets);
   } catch (e) {
     console.error(e);
@@ -152,6 +184,13 @@ export async function processTask(task, env) {
   }
 }
 const reviewKbIfReady = (job) => (job.content ? reviewKb(job.id) : {});
+
+// Sau khi có poster: tự soạn 4 bản Word ở một tác vụ riêng (WORD_AUTO = "0" để tắt).
+async function queueWord(env, job) {
+  if (env.WORD_AUTO === "0" || !job.content) return;
+  await send(env, job.chat_id, "📄 Đang soạn 4 bản Word (Việt · Anh–Việt · Trung giản–Việt · Trung phồn–Việt)…");
+  await env.JOBS.send({ type: "word", jobId: job.id });
+}
 
 async function generate(env, job) {
   const parts = []; let table = null;
@@ -308,6 +347,11 @@ async function tiktokAccessToken(env) {
 export async function setupWebhook(url, env) {
   if (url.searchParams.get("key") !== env.APP_PASSWORD) return new Response("Sai mật khẩu", { status: 403 });
   const r = await tg(env, "setWebhook", { url: `${env.PUBLIC_BASE_URL || url.origin}/tg/webhook`, secret_token: env.TG_WEBHOOK_SECRET, allowed_updates: ["message", "callback_query"], drop_pending_updates: true });
-  await tg(env, "setMyCommands", { commands: [{ command: "moi", description: "Bắt đầu bài mới" }, { command: "id", description: "Xem ID Telegram" }, { command: "help", description: "Hướng dẫn" }] });
+  await tg(env, "setMyCommands", { commands: [
+    { command: "moi", description: "Bắt đầu bài mới" },
+    { command: "bantin", description: "Bài mới (dùng trong nhóm)" },
+    { command: "id", description: "Xem ID Telegram / ID nhóm" },
+    { command: "help", description: "Hướng dẫn" },
+  ] });
   return new Response(r.ok ? "Đã nối webhook Telegram. Mở bot và gửi /start." : `Lỗi: ${r.description}`, { headers: { "content-type": "text/plain; charset=utf-8" } });
 }
