@@ -27,7 +27,7 @@ max_retries = 0
 
 [triggers]
 # Giờ UTC: 23:00 = 06:00 sáng VN, 07:00 = 14:00 VN → Agent quét tin; */15 = kiểm tra bài hẹn giờ vàng
-crons = ["0 23 * * *", "0 7 * * *", "*/15 * * * *", "0 1 * * 1", "0 13 * * 0"]
+crons = ["0 23 * * *", "0 7 * * *", "*/15 * * * *", "0 1 * * MON", "0 13 * * SUN"]
 
 [limits]
 cpu_ms = 120000          # cần gói Workers Paid (đọc Excel lớn, mã hoá PDF)

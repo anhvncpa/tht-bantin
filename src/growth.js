@@ -88,10 +88,13 @@ export async function weeklyInsights(env, kvGet, kvSet) {
   if (!env.FB_PAGE_ID || !env.FB_PAGE_TOKEN) throw new Error("Chưa cấu hình FB_PAGE_ID / FB_PAGE_TOKEN");
   const page = await fbGet(env, env.FB_PAGE_ID, { fields: "name,followers_count,fan_count" });
   const since = Math.floor((Date.now() - 7 * 86400e3) / 1000);
-  const posts = await fbGet(env, `${env.FB_PAGE_ID}/posts`, {
-    fields: "message,created_time,permalink_url,reactions.summary(true).limit(0),comments.summary(true).limit(0),shares",
-    since: String(since), limit: "50",
-  });
+  let posts = { data: [] }, postErr = "";
+  try {
+    posts = await fbGet(env, `${env.FB_PAGE_ID}/posts`, {
+      fields: "message,created_time,permalink_url,reactions.summary(true).limit(0),comments.summary(true).limit(0),shares",
+      since: String(since), limit: "50",
+    });
+  } catch (e) { postErr = e.message; }
   const rows = (posts.data || []).map((p) => {
     const re = p.reactions?.summary?.total_count || 0, co = p.comments?.summary?.total_count || 0, sh = p.shares?.count || 0;
     const hourVN = new Date(new Date(p.created_time).getTime() + VN).getUTCHours();
@@ -123,7 +126,7 @@ export async function weeklyInsights(env, kvGet, kvSet) {
     `📊 Báo cáo tuần – ${page.name || "THT Audit"} (${today()})`,
     `👥 Người theo dõi: ${followers.toLocaleString("vi-VN")}${delta === null ? "" : ` (${delta >= 0 ? "+" : ""}${delta} so với tuần trước)`}`,
     `📝 ${rows.length} bài · 👍 ${sum.re} · 💬 ${sum.co} · ↗️ ${sum.sh}`,
-    rows.length ? `\n🏆 Bài tốt nhất:\n${top}` : "\nTuần này chưa có bài đăng.",
+    postErr ? "\n⚠️ Chưa đọc được số liệu từng bài: token thiếu quyền pages_read_user_content." : rows.length ? `\n🏆 Bài tốt nhất:\n${top}` : "\nTuần này chưa có bài đăng.",
     learnings ? `\n💡 Bài học cho tuần sau:\n${learnings}` : "",
   ].join("\n");
 }
