@@ -27,7 +27,7 @@ max_retries = 0
 
 [triggers]
 # Giờ UTC: 23:00 = 06:00 sáng VN, 07:00 = 14:00 VN → Agent quét tin; */15 = kiểm tra bài hẹn giờ vàng
-crons = ["0 23 * * *", "0 7 * * *", "*/15 * * * *", "0 1 * * MON", "0 13 * * SUN"]
+crons = ["0 23 * * *", "0 7 * * *", "*/15 * * * *", "0 13 * * SUN"]
 
 [limits]
 cpu_ms = 120000          # cần gói Workers Paid (đọc Excel lớn, mã hoá PDF)
@@ -57,7 +57,10 @@ AGENT_MIN_SCORE = "6"                       # chỉ soạn tin có độ "nóng"
 AGENT_LOOKBACK_DAYS = "7"
 AGENT_SEARCH_MAX = "6"                      # số lượt tìm web mỗi lần quét (~0,01 USD/lượt)
 AGENT_SLOTS = "07:30,11:45,20:00"           # giờ vàng đăng bài (giờ VN)
-AGENT_TARGETS = "fb,story"                  # đăng theo lịch: FB bài viết + Story
+AGENT_TARGETS = "fb,story"   # đăng theo lịch: FB bài viết + Story
+VIDEO_ENABLED = "1"          # tìm video chính sách lúc 14:00 mỗi ngày
+VIDEO_MAX_PER_SCAN = "1"     # tối đa 1 video/ngày
+VIDEO_MIN_SCORE = "6"
 GH_REPO = "anhvncpa/tht-bantin"             # repo chứa luồng dựng video
 GH_REF = "main"
 TIKTOK_MODE = "inbox"                       # inbox: gửi nháp vào app TikTok · direct: đăng thẳng (cần audit)

@@ -62,10 +62,12 @@ export async function factCheck(env, parts, note) {
   return msg.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 }
 
-export async function generateContent(env, { parts, note = "", verify = true, quality = "fast", pages = "auto" }) {
+export async function generateContent(env, { parts, note = "", verify = true, quality = "fast", pages = "auto", recentStyles = [] }) {
   const checks = verify ? await factCheck(env, parts, note) : "";
   let extra = PAGES_RULE[pages] || "";
   if (note) extra += `\nGhi chú/yêu cầu của người gửi: ${note}\n`;
+  if (env.STRATEGY_NOTES) extra += `\nĐịnh hướng nội dung tuần này (từ tự đánh giá): ${env.STRATEGY_NOTES}\n`;
+  if (recentStyles.length) extra += `\nMẫu poster vừa dùng gần đây (mới nhất trước): ${recentStyles.join(", ")}.\n`;
   if (checks) extra += `\n<ghi_chu_kiem_chung>\n${checks}\n</ghi_chu_kiem_chung>\n`;
   const msg = await claude(env, {
     model: modelFor(env, quality), max_tokens: 8000, system: SYSTEM, tools: [TOOL],
@@ -103,6 +105,7 @@ Nhận bản nháp poster (JSON). Tự chấm theo checklist, rồi VIẾT LẠI
 4. Làm được ngay: phần việc cần làm bắt đầu bằng động từ, cụ thể ai – làm gì – trước ngày nào.
 5. Đúng: TUYỆT ĐỐI không thêm số liệu, số hiệu, ngày tháng không có trong bản nháp hoặc ghi chú kiểm chứng; nếu ghi chú kiểm chứng báo sai thì sửa theo nguồn.
 6. Bài Facebook: câu đầu là móc câu (câu hỏi hoặc con số), 350–650 ký tự, kết bằng 1 câu hỏi mở mời bình luận (vd "Doanh nghiệp anh/chị đã chuẩn bị chưa?"), không chèn liên hệ/QR/lời mời hỗ trợ.
+7. Song ngữ: cập nhật trường "en" khớp với bản tiếng Việt sau khi sửa (cùng số ý, cùng thứ tự), tiếng Anh ngắn gọn, chuyên nghiệp.
 Giữ nguyên cấu trúc trường, số trang (extra_pages) và các trường không cần sửa.`;
 
 export async function editorPass(env, draft, checks = "", quality = "fast") {

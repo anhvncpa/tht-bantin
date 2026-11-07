@@ -61,9 +61,10 @@ export default {
   // Cron: quét tin mới (AI Agent) và đăng các bài đã hẹn giờ vàng
   async scheduled(event, env, ctx) {
     if (event.cron === "*/15 * * * *") ctx.waitUntil(env.JOBS.send({ type: "due" }));
-    else if (event.cron === "0 1 * * MON") ctx.waitUntil(env.JOBS.send({ type: "plan" }));      // Thứ Hai 08:00 VN
-    else if (event.cron === "0 13 * * SUN") ctx.waitUntil(env.JOBS.send({ type: "insights" })); // Chủ nhật 20:00 VN
-    else if (env.AGENT_ENABLED !== "0") ctx.waitUntil(env.JOBS.send({ type: "scout" }));
+    else if (event.cron === "0 13 * * SUN") ctx.waitUntil(env.JOBS.send({ type: "insights" })); // CN 20:00 VN: tự đánh giá → kế hoạch tuần tới
+    else if (env.AGENT_ENABLED === "0") return;
+    else if (event.cron === "0 23 * * *") ctx.waitUntil(env.JOBS.send({ type: "daily" }));     // 06:00 VN: dò tin + video, chọn 1 bài tốt nhất
+    else if (event.cron === "0 7 * * *") ctx.waitUntil(env.JOBS.send({ type: "pool" }));       // 14:00 VN: dò thêm, chỉ đưa vào kho ứng viên
   },
 
   // Queue consumer: slow Telegram work (Claude, rendering, publishing)

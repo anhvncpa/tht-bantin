@@ -29,3 +29,13 @@ export async function postToPage(env, images, caption) {
   if (!res.ok || !data.id) throw new Error(`Facebook từ chối bài viết: ${data.error?.message || res.status}`);
   return `https://www.facebook.com/${data.id}`;
 }
+
+// Bài chia sẻ link (video của nguồn khác): Facebook tự hiện khung xem trước video gốc, ghi rõ nguồn trong nội dung.
+export async function postLink(env, message, link) {
+  if (!env.FB_PAGE_ID || !env.FB_PAGE_TOKEN) throw new Error("Chưa cấu hình FB_PAGE_ID / FB_PAGE_TOKEN");
+  const form = new URLSearchParams({ message, link, access_token: env.FB_PAGE_TOKEN });
+  const res = await fetch(`${graph(env)}/${env.FB_PAGE_ID}/feed`, { method: "POST", body: form });
+  const data = await res.json();
+  if (!res.ok || !data.id) throw new Error(`Facebook từ chối bài chia sẻ: ${data.error?.message || res.status}`);
+  return `https://www.facebook.com/${data.id}`;
+}

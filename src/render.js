@@ -18,14 +18,15 @@ function opts(env, qrUrl) {
     brand: brandOf(env),
     month: `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`,
     date: `Ngày ${d.getUTCDate()} tháng ${d.getUTCMonth() + 1} năm ${d.getUTCFullYear()}`,
+    bilingual: env.BILINGUAL !== "0",
     qr: qrUrl ? (size, color) => globalThis.THTQR.svg(qrUrl, size, color) : null,
   };
 }
 
-// The page fits itself to A4 (zoom down to 85%) once fonts are loaded, then flags body[data-ready].
+// The page fits itself to A4 (zoom down to 72%) once fonts are loaded, then flags body[data-ready].
 const FIT_SCRIPT = `<script>(async function(){try{await document.fonts.ready}catch(e){}
 var p=document.getElementById('poster');p.style.height='auto';var h=p.scrollHeight;p.style.height='${A4H}px';
-if(h>${A4H}){var z=Math.max(.85,${A4H}/h);p.style.zoom=z;p.style.width=(${A4W}/z)+'px';p.style.height=(${A4H}/z)+'px';}
+if(h>${A4H}){var z=Math.max(.72,${A4H}/h);p.style.zoom=z;p.style.width=(${A4W}/z)+'px';p.style.height=(${A4H}/z)+'px';}
 document.body.setAttribute('data-fit',String(h));document.body.setAttribute('data-ready','1');})();</script>`;
 
 export function pageDocument(style, content, env, qrUrl, index, mode = "a4") {

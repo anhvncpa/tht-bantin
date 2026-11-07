@@ -1,6 +1,33 @@
 // The 5 THT poster styles as plain functions: (content, opts) → HTML string of a 794px-wide poster root.
 (function () {
-  const e = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Song ngữ: khi BI có bản dịch cho đúng chuỗi tiếng Việt, in thêm dòng tiếng Anh nhỏ, nghiêng ngay bên dưới
+  let BI = null;
+  const EN_CSS = "display:block;font-size:.74em;line-height:1.32;font-style:italic;font-weight:400;letter-spacing:0;text-transform:none;opacity:.8;margin-top:2px";
+  const e = (s) => {
+    const x = esc(s);
+    if (!BI || s == null) return x;
+    const en = BI.get(String(s).trim());
+    return en ? `${x}<span class="en" lang="en" style="${EN_CSS}">${esc(en)}</span>` : x;
+  };
+  function biMap(c) {
+    const m = new Map(), en = c.en || {};
+    const add = (vi, t) => { vi = String(vi || "").trim(); t = String(t || "").trim(); if (vi && t && vi !== t) m.set(vi, t); };
+    const arr = (x) => (Array.isArray(x) ? x : []);
+    add(c.title_line2 || c.title_line1, en.title); add(c.title_question, en.title);
+    add(c.issuer_sentence, en.issuer_sentence);
+    add(c.highlight?.label, en.highlight_label); add(c.highlight?.unit, en.highlight_unit);
+    add(c.audience?.title, en.audience_title);
+    arr(c.audience?.items).forEach((it, i) => add(it.text, arr(en.audience_texts)[i]));
+    add(c.points?.title, en.points_title);
+    arr(c.points?.items).forEach((it, i) => { const t = arr(en.points_items)[i] || {}; add(it.title, t.title); add(it.text, t.text); });
+    add(c.actions?.title, en.actions_title);
+    arr(c.actions?.items).forEach((it, i) => { const t = arr(en.actions_items)[i] || {}; add(it.title, t.title); add(it.text, t.text); });
+    add(c.recommendation, en.recommendation);
+    arr(c.extra_pages).forEach((pg, i) => { const t = arr(en.extra_pages)[i] || {}; add(pg.title, t.title);
+      arr(pg.sections).forEach((sc, j) => { const u = arr(t.sections)[j] || {}; add(sc.heading, u.heading); arr(sc.items).forEach((x, k) => add(x, arr(u.items)[k])); }); });
+    return m;
+  }
   const cap = (s) => { s = String(s || "").trim().toLowerCase(); return s.charAt(0).toUpperCase() + s.slice(1); };
   const lowerFirst = (s) => { s = String(s || ""); const w = s.split(" ")[0]; return w.length > 1 && w === w.toUpperCase() ? s : s.charAt(0).toLowerCase() + s.slice(1); };
   const stripQ = (s) => String(s || "").replace(/[\s?]+$/, "");
@@ -225,8 +252,11 @@ ${last ? "" : `<div style="flex-shrink:0;font-size:12px;font-weight:700;color:${
 
   const pageCount = (c) => 1 + Math.min(2, (c.extra_pages || []).length);
   function renderPage(style, c, o, index) {
-    if (index === 0) return STYLES[style].render(c, o);
-    return renderExtra(style, c.extra_pages[index - 1], index, pageCount(c), c, o);
+    BI = c && c.en && !c.bilingual_off && (!o || o.bilingual !== false) ? biMap(c) : null;
+    try {
+      if (index === 0) return STYLES[style].render(c, o);
+      return renderExtra(style, c.extra_pages[index - 1], index, pageCount(c), c, o);
+    } finally { BI = null; }
   }
 
   const fontsHref = (style) => `https://fonts.googleapis.com/css2?family=${STYLES[style].fonts}&display=swap`;
