@@ -58,6 +58,14 @@ export default {
     }
   },
 
+  // Cron: quét tin mới (AI Agent) và đăng các bài đã hẹn giờ vàng
+  async scheduled(event, env, ctx) {
+    if (event.cron === "*/15 * * * *") ctx.waitUntil(env.JOBS.send({ type: "due" }));
+    else if (event.cron === "0 1 * * 1") ctx.waitUntil(env.JOBS.send({ type: "plan" }));      // Thứ Hai 08:00 VN
+    else if (event.cron === "0 13 * * 0") ctx.waitUntil(env.JOBS.send({ type: "insights" })); // Chủ nhật 20:00 VN
+    else if (env.AGENT_ENABLED !== "0") ctx.waitUntil(env.JOBS.send({ type: "scout" }));
+  },
+
   // Queue consumer: slow Telegram work (Claude, rendering, publishing)
   async queue(batch, env) {
     for (const msg of batch.messages) {

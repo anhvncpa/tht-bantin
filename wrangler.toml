@@ -25,13 +25,19 @@ queue = "tht-jobs"
 max_batch_size = 1
 max_retries = 0
 
+[triggers]
+# Giờ UTC: 23:00 = 06:00 sáng VN, 07:00 = 14:00 VN → Agent quét tin; */15 = kiểm tra bài hẹn giờ vàng
+crons = ["0 23 * * *", "0 7 * * *", "*/15 * * * *", "0 1 * * 1", "0 13 * * 0"]
+
 [limits]
 cpu_ms = 120000          # cần gói Workers Paid (đọc Excel lớn, mã hoá PDF)
 
 [vars]
 PUBLIC_BASE_URL = "https://tht-bantin.thtdn.workers.dev"   # đổi thành link Worker (hoặc tên miền riêng)
-CLAUDE_MODEL = "claude-haiku-5-5"          # rẻ nhất, mặc định
-CLAUDE_MODEL_STRONG = "claude-sonnet-5-5"  # khi bấm "Soạn kỹ"
+CLAUDE_MODEL = "claude-sonnet-5-5"         # soạn bài mặc định (chất lượng cao)
+CLAUDE_MODEL_STRONG = "claude-opus-5-5"    # khi bấm "Soạn kỹ"
+CLAUDE_MODEL_CHEAP = "claude-haiku-5-5"    # kiểm chứng, dò tin (rẻ)
+EDITOR_PASS = "1"                          # vòng Tổng biên tập; "0" để tắt
 WEB_VERIFY = "1"                            # 1 = tra web kiểm chứng (≈0,01 USD/lượt tìm)
 WEB_SEARCH_MAX = "3"
 FB_GRAPH_VERSION = "v26.0"
@@ -44,6 +50,14 @@ TG_ALLOWED_IDS = "1175652586,616501324"               # ID Telegram được dù
 TG_ALLOWED_CHATS = "-5505623108" # ID nhóm Telegram được dùng bot (gõ /id trong nhóm)
 THT_ADDRESS = "Trụ sở: 25 Hoàng Hoa Thám, P. Gia Định, TP. HCM · CN Đà Nẵng: 312 Lê Đại Hành, P. Cẩm Lệ, TP. Đà Nẵng"
 WORD_AUTO = "1"
+AGENT_ENABLED = "1"                         # 0 = tắt tự quét tin
+AGENT_CHAT_ID = "-5505623108"               # nhóm nhận tin Agent tìm được để duyệt
+AGENT_MAX_PER_SCAN = "2"                    # tối đa số bản tin soạn mỗi lần quét
+AGENT_MIN_SCORE = "6"                       # chỉ soạn tin có độ "nóng" từ 6/10
+AGENT_LOOKBACK_DAYS = "7"
+AGENT_SEARCH_MAX = "6"                      # số lượt tìm web mỗi lần quét (~0,01 USD/lượt)
+AGENT_SLOTS = "07:30,11:45,20:00"           # giờ vàng đăng bài (giờ VN)
+AGENT_TARGETS = "fb,story"                  # đăng theo lịch: FB bài viết + Story
 GH_REPO = "anhvncpa/tht-bantin"             # repo chứa luồng dựng video
 GH_REF = "main"
 TIKTOK_MODE = "inbox"                       # inbox: gửi nháp vào app TikTok · direct: đăng thẳng (cần audit)

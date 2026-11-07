@@ -19,6 +19,11 @@ IKEY = os.environ["INTERNAL_KEY"]
 H = {"x-internal-key": IKEY}
 ROOT = Path(__file__).resolve().parent.parent
 MUSIC_DIR = ROOT / "music"
+STORY_MUSIC_DIR = MUSIC_DIR / "story"   # nhạc có lời, chỉ dùng cho Facebook Story
+AUDIO_EXT = (".mp3", ".m4a", ".aac", ".wav")
+
+def tracks_in(d):
+    return [p for p in d.glob("*") if p.suffix.lower() in AUDIO_EXT] if d.exists() else []
 FONT_CANDIDATES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"]
 
 
@@ -31,14 +36,7 @@ def esc_drawtext(s):
     return s.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’").replace("%", "\\%")
 
 
-def music_credit(path):
-    """Ghi công cho nhạc CC BY (music/vocal/credits.json). Nhạc Mixkit không cần ghi công -> None."""
-    try:
-        return json.loads((path.parent / "credits.json").read_text(encoding="utf-8")).get(path.name)
-    except Exception:
-        return None
-
-def make_video(frames, hook, out, seconds_per_page=None):
+def make_video(frames, hook, out, seconds_per_page=None, music_dir=None):
     n = len(frames)
     per = seconds_per_page or (9 if n == 1 else 7)
     fade = 0.6
@@ -84,16 +82,8 @@ def make_video(frames, hook, out, seconds_per_page=None):
             parts.append(f"drawtext=fontfile={font}:text='{esc_drawtext(line)}':fontcolor=white:fontsize={fs}:"
                          f"x=(w-text_w)/2:y={170 + i * lh}:enable='lt(t,3.5)'")
         vf = ",".join(parts)
-    tracks = [p for p in MUSIC_DIR.rglob("*") if p.suffix.lower() in (".mp3", ".m4a", ".aac", ".wav")]
+    tracks = tracks_in(music_dir or MUSIC_DIR)
     music = random.choice(tracks) if tracks else None
-    credit = music_credit(music) if music else None
-    if credit and font:  # nhạc CC BY: ghi công ngay trên video (bắt buộc theo giấy phép)
-        ct = "♪ " + credit["short"]
-        cfs = max(16, min(24, int(1000 / (len(ct) * 0.55))))
-        cbar = (f"drawbox=x=0:y=ih-46:w=iw:h=46:color=black@0.4:t=fill,"
-                f"drawtext=fontfile={font}:text='{esc_drawtext(ct)}':fontcolor=white:fontsize={cfs}:"
-                f"x=(w-text_w)/2:y=h-23-text_h/2")
-        vf = cbar if vf == "null" else vf + "," + cbar
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(joined)]
     if music:
         cmd += ["-stream_loop", "-1", "-i", str(music)]
@@ -105,7 +95,7 @@ def make_video(frames, hook, out, seconds_per_page=None):
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", str(out)]
     subprocess.run(cmd, check=True)
     shutil.rmtree(work, ignore_errors=True)
-    return music.name if music else None, total, credit
+    return music.name if music else None, total
 
 
 # ---------------- Facebook Story ----------------
@@ -189,21 +179,23 @@ def main():
         p.write_bytes(requests.get(f"{WORKER}/api/internal/file/{requests.utils.quote(key, safe='')}", headers=H, timeout=60).content)
         frames.append(p)
     out = work / "story.mp4"
-    music, secs, credit = make_video(frames, man.get("story_hook", ""), out)
+    music, secs = make_video(frames, man.get("story_hook", ""), out)
     log(f"video {secs:.1f}s, music={music}")
     requests.put(f"{WORKER}/api/internal/video/{job_id}", headers=H, data=out.read_bytes(), timeout=300)
 
     results = [f"🎬 Video {secs:.0f}s, nhạc: {music or 'không có (thêm file vào thư mục music/)'}"]
+    # Facebook Story: nếu có nhạc có lời trong music/story/ thì dựng riêng 1 bản video cho Story
+    story_out = out
+    if "story" in targets and tracks_in(STORY_MUSIC_DIR):
+        story_out = work / "story_vocal.mp4"
+        smusic, _ = make_video(frames, man.get("story_hook", ""), story_out, music_dir=STORY_MUSIC_DIR)
+        results.append(f"🎤 Story dùng nhạc có lời: {smusic}")
     tags = " ".join(man.get("hashtags", []))
-    if credit:  # ghi công nhạc CC BY vào mô tả YouTube và caption TikTok
-        results.append(f"🎵 Ghi công nhạc (CC BY): {credit['full']}")
-        man["youtube_description"] = (man.get("youtube_description") or "") + f"\n\n🎵 Nhạc: {credit['full']}"
-        man["tiktok_caption"] = (man.get("tiktok_caption") or tags) + f"\n\n🎵 Nhạc: {credit['full']}"
     if man.get("dry_run"):
         results.append("Chế độ thử: đã dựng video, chưa đăng lên nền tảng nào.")
     else:
         if "story" in targets:
-            try: results.append(f"📱 FB Story: {post_fb_story(out)}")
+            try: results.append(f"📱 FB Story: {post_fb_story(story_out)}")
             except Exception as e: results.append(f"📱 FB Story lỗi: {e}")
         if "tiktok" in targets:
             try: results.append(f"🎵 TikTok: {post_tiktok(out, man['tiktok_caption'] or tags, man['tiktok_mode'], man['tiktok_privacy'])}")
