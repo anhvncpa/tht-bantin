@@ -1,6 +1,9 @@
 // Claude calls shared by the web app and the Telegram bot.
 // Cheapest setup: Haiku 5.5 by default + prompt caching on the fixed system prompt and tool schema.
 import { POSTER_SCHEMA, SYSTEM_PROMPT } from "./schema.js";
+import { hubAI } from "./hub.js";
+// Gắn nhãn bước cho Agent Hub (chỉ khi agent đã mở "run" – env là bản sao riêng)
+export const hubTag = (env, step, label) => { if (env?.HUB_RUN) { env.HUB_STEP = step; env.HUB_LABEL = label; } };
 
 const TOOL = { name: "poster_content", description: "Nội dung poster + bài đăng mạng xã hội", input_schema: POSTER_SCHEMA, cache_control: { type: "ephemeral" } };
 const SYSTEM = [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }];
@@ -20,6 +23,7 @@ export async function claude(env, body) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(`Claude báo lỗi: ${data.error?.message || res.status}`);
+  await hubAI(env, body.model, data.usage, env.HUB_LABEL);
   return data;
 }
 
@@ -63,7 +67,9 @@ export async function factCheck(env, parts, note) {
 }
 
 export async function generateContent(env, { parts, note = "", verify = true, quality = "fast", pages = "auto", recentStyles = [] }) {
+  hubTag(env, "draft", "Kiểm chứng nguồn trên web");
   const checks = verify ? await factCheck(env, parts, note) : "";
+  hubTag(env, "draft", "Soạn bản nháp");
   let extra = PAGES_RULE[pages] || "";
   if (note) extra += `\nGhi chú/yêu cầu của người gửi: ${note}\n`;
   if (env.STRATEGY_NOTES) extra += `\nĐịnh hướng nội dung tuần này (từ tự đánh giá): ${env.STRATEGY_NOTES}\n`;
@@ -75,6 +81,8 @@ export async function generateContent(env, { parts, note = "", verify = true, qu
     messages: [{ role: "user", content: sourceBlocks(parts, extra) }],
   });
   let content = toolInput(msg);
+  const draft = { title: [content.title_line1, content.title_line2].filter(Boolean).join(" "), caption: String(content.facebook_caption || "").split("\n")[0] };
+  hubTag(env, "editor", "Tổng biên tập chấm & viết lại");
   let usage = msg.usage;
   if (env.EDITOR_PASS !== "0") {
     try { const ed = await editorPass(env, content, checks, quality); content = ed.content; usage = { draft: usage, editor: ed.usage }; }
@@ -82,7 +90,7 @@ export async function generateContent(env, { parts, note = "", verify = true, qu
   }
   if (pages === "1") content.extra_pages = [];
   content.extra_pages = (content.extra_pages || []).slice(0, 2);
-  return { content, checks, usage };
+  return { content, checks, usage, draft };
 }
 
 export async function reviseContent(env, content, instruction, quality = "fast") {

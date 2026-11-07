@@ -11,7 +11,8 @@ import { scout, itemSource, nextSlots, vnLabel } from "./agent.js";
 import { planWeek, ideaSource, weeklyInsights, PILLARS } from "./growth.js";
 import { scoutVideos, videoSource, findVideoUrl } from "./videoscout.js";
 import { withStrategy, tagJob, markPublished, getStrategy } from "./strategy.js";
-import { claude, modelFor } from "./claude.js";
+import { claude, modelFor, hubTag } from "./claude.js";
+import { hubEvent } from "./hub.js";
 
 const now = () => new Date().toISOString();
 const URL_RE = /https?:\/\/\S+/;
@@ -243,6 +244,7 @@ async function onButton(q, env) {
   if (act === "sc") {
     const at = Number(arg) * 60000, targets = (env.AGENT_TARGETS || "fb,story") + ((await wantsVideo(env, id)) ? ",tiktok,youtube" : "");
     await kvSet(env, `sched:${id}`, JSON.stringify({ at, targets }));
+    await hubEvent(env, { run: id, step: "review", status: "waiting", title: `Anh duyệt, hẹn đăng ${targetsLabel(targets)} lúc ${vnLabel(at)}` });
     job.status = "scheduled"; await saveJob(env, job);
     return tg(env, "editMessageText", { chat_id: chat, message_id: q.message.message_id, text: `✅ Đã hẹn đăng ${targetsLabel(targets)} lúc ${vnLabel(at)}. Xem/huỷ: /lich` });
   }
@@ -251,8 +253,8 @@ async function onButton(q, env) {
     if (job.status === "scheduled") { job.status = "review"; await saveJob(env, job); }
     return tg(env, "editMessageText", { chat_id: chat, message_id: q.message.message_id, text: "Đã huỷ hẹn giờ cho bài này." });
   }
-  if (act === "x") { await clearKb(); job.status = "cancelled"; await saveJob(env, job); return send(env, chat, "Đã huỷ bài này."); }
-  if (act === "pub") { await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: arg.split(",") }); }
+  if (act === "x") { await hubEvent(env, { run: id, step: "review", status: "done", title: "Anh đã huỷ bài này" }); await clearKb(); job.status = "cancelled"; await saveJob(env, job); return send(env, chat, "Đã huỷ bài này."); }
+  if (act === "pub") { await hubEvent(env, { run: id, step: "review", status: "done", title: `Anh duyệt: đăng ngay → ${targetsLabel(arg)}` }); await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: arg.split(",") }); }
 }
 
 // ---------------- queue tasks (slow work) ----------------
@@ -265,18 +267,26 @@ export async function processTask(task, env) {
   if (task.type === "autogo") return autoGo(env, task.jobId, task.at);
   if (task.type === "vscout") return runVideoScout(env, task.chat, task.manual);
   if (task.type === "daily") return runDaily(env);
-  if (task.type === "pool") { await runScout(env); return runVideoScout(env); }
+  if (task.type === "pool") {
+    const RUN = `pool-${dayKey()}`; env = { ...env, HUB_RUN: RUN, HUB_STEP: "scout", HUB_LABEL: "Dò tin & video" };
+    await hubEvent(env, { run: RUN, step: "scout", status: "start", runTitle: `Dò thêm buổi chiều ${dayKey().split("-").reverse().join("/")}`, title: "Dò văn bản & video, đưa vào kho" });
+    await runScout(env); await runVideoScout(env);
+    const pool = JSON.parse((await kvGet(env, "pool")) || "[]");
+    return hubEvent(env, { run: RUN, step: "scout", status: "done", title: `Kho hiện có ${pool.length} ứng viên`, detail: pool.map((x) => `[${x.kind}] ${x.score}/10 · ${x.title}`).join("\n") });
+  }
   if (task.type === "insights") return runInsights(env, task.chat);
   const job = await getJob(env, task.jobId);
   if (!job) return;
+  env = { ...env, HUB_RUN: job.id };
   try {
     if (task.type === "generate") { await generate(env, job); await offerLetter(env, job); }
     else if (task.type === "render") await renderAndPreview(env, job);
-    else if (task.type === "revise") { const off = job.content?.bilingual_off; job.content = await reviseContent(env, job.content, task.instruction, job.quality); if (off) job.content.bilingual_off = true; await attachShare(env, job); await saveJob(env, job); await renderAndPreview(env, job); await offerLetter(env, job); }
+    else if (task.type === "revise") { await hubEvent(env, { run: job.id, step: "draft", status: "start", title: `Sửa theo yêu cầu của anh: ${task.instruction}` }); hubTag(env, "draft", "Sửa bài"); const off = job.content?.bilingual_off; job.content = await reviseContent(env, job.content, task.instruction, job.quality); if (off) job.content.bilingual_off = true; await attachShare(env, job); await saveJob(env, job); await renderAndPreview(env, job); await offerLetter(env, job); }
     else if (task.type === "word") await sendLetter(env, job, task.kind || "all");
     else if (task.type === "publish") await publish(env, job, task.targets);
   } catch (e) {
     console.error(e);
+    await hubEvent(env, { run: job.id, step: env.HUB_STEP || task.type, status: "error", title: `Lỗi: ${e.message}`, detail: String(e.stack || e).slice(0, 2000) });
     await send(env, job.chat_id, `Có lỗi: ${e.message}\nAnh thử lại, hoặc /moi để làm lại.`, reviewKbIfReady(job));
   }
 }
@@ -293,6 +303,10 @@ async function offerLetter(env, job) {
 
 async function generate(env, job) {
   const parts = []; let table = null;
+  const meta0 = JSON.parse((await kvGet(env, `meta:${job.id}`)) || "{}");
+  const srcLabel = { agent: "Agent dò tin", plan: "Kế hoạch tuần", video: "Video chính sách", manual: "Anh gửi" }[meta0.source] || "Anh gửi";
+  await hubEvent(env, { run: job.id, step: "draft", status: "start", runTitle: `${srcLabel}: ${(job.note || "").split("\n").find((l) => l.trim() && !/^VIDEO CHÍNH/.test(l))?.replace(/^(Tên|Tiêu đề|Tiêu đề đề xuất): /, "").slice(0, 90) || `${job.files.length} file`}`,
+    title: `Bắt đầu soạn (${job.quality === "strong" ? "Opus – soạn kỹ" : "Sonnet"}) · nguồn: ${srcLabel}`, detail: (job.note || "").slice(0, 3000) || `${job.files.length} file: ${job.files.map((f) => f.name).join(", ")}` });
   for (const f of job.files) {
     const buf = await download(env, f.file_id);
     const r = await readBuffer(f.name, f.mime, buf);
@@ -300,7 +314,10 @@ async function generate(env, job) {
   }
   if (!(await kvGet(env, `meta:${job.id}`))) await tagJob(env, kvSet, job.id, { source: "manual" });
   const recent = JSON.parse((await kvGet(env, "style:recent")) || "[]");
-  const { content, checks } = await generateContent(env, { parts, note: job.note, verify: env.WEB_VERIFY !== "0", quality: job.quality, pages: job.pages || "auto", recentStyles: recent });
+  const { content, checks, draft } = await generateContent(env, { parts, note: job.note, verify: env.WEB_VERIFY !== "0", quality: job.quality, pages: job.pages || "auto", recentStyles: recent });
+  const finalTitle = [content.title_line1, content.title_line2].filter(Boolean).join(" ");
+  await hubEvent(env, { run: job.id, step: "draft", status: "done", title: `Bản nháp: ${draft?.title || finalTitle}`,
+    detail: `KẾT QUẢ KIỂM CHỨNG WEB:\n${checks || "(không kiểm chứng)"}${content.corrections?.length ? "\n\nĐÃ CHỈNH SO VỚI NGUỒN:\n- " + content.corrections.join("\n- ") : ""}${content.uncertain?.length ? "\n\nCHƯA CHẮC, CẦN ANH KIỂM TRA:\n- " + content.uncertain.join("\n- ") : ""}` });
   job.content = content; job.checks = checks;
   await attachShare(env, job);
   if (!job.style || job.style === "auto") {
@@ -308,6 +325,10 @@ async function generate(env, job) {
     job.auto_style = true;
   }
   await kvSet(env, "style:recent", JSON.stringify([job.style, ...recent.filter((x) => x !== job.style)].slice(0, 3)));
+  await hubEvent(env, { run: job.id, step: "editor", status: "done", runTitle: `${srcLabel}: ${finalTitle}`,
+    title: draft?.title && draft.title !== finalTitle ? `Viết lại tiêu đề: “${draft.title}” → “${finalTitle}”` : `Giữ tiêu đề: “${finalTitle}”`,
+    detail: `Mẫu poster: ${job.style} – ${STYLE_NAMES[job.style]}${content.style_reason ? " (lý do: " + content.style_reason + ")" : ""}\nMẫu vừa dùng gần đây: ${recent.join(", ") || "-"}\n\nBÀI FACEBOOK SAU BIÊN TẬP:\n${content.facebook_caption || ""}` });
+  hubTag(env, "render", "Dựng poster");
   if (table && !job.qr_url) {
     const slug = (content.slug || job.id).toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40) || job.id;
     await env.FILES.put(`tc/${slug}.json`, JSON.stringify({ title: "Tra cứu danh sách doanh nghiệp", subtitle: content.doc_ref || "", ...table }),
@@ -324,6 +345,7 @@ async function generate(env, job) {
 async function renderAndPreview(env, job, lookupRows = 0) {
   if (job.content) job.content.facebook_caption = withFbFooter(job.content.facebook_caption);
   job.render = await renderJob(env, job);
+  await hubEvent(env, { run: job.id, step: "render", status: "done", title: `Dựng ${job.render.pages.length} trang poster mẫu ${job.style} – ${STYLE_NAMES[job.style]}${job.content?.bilingual_off ? " (chỉ tiếng Việt)" : " (song ngữ)"}` });
   job.status = "review";
   await saveJob(env, job);
   const images = [];
@@ -339,6 +361,7 @@ async function renderAndPreview(env, job, lookupRows = 0) {
   await send(env, job.chat_id,
     `▶️ YouTube: ${c.youtube_title}\n🎵 TikTok/Story mở đầu: “${c.story_hook}”\n🔑 Từ khoá: ${(c.seo_keywords || []).join(", ")}\n\n` +
     `Duyệt và chọn nơi đăng${env.DRY_RUN === "1" ? " (CHẾ ĐỘ THỬ – không đăng thật)" : ""}:`, reviewKb(job.id, await wantsVideo(env, job.id)));
+  await hubEvent(env, { run: job.id, step: "review", status: "waiting", title: "Đã gửi bản xem trước vào Telegram – chờ anh duyệt" });
 }
 
 async function publish(env, job, targets) {
@@ -371,6 +394,10 @@ async function publish(env, job, targets) {
   }
   job.status = "published";
   await saveJob(env, job);
+  const fbLine = out.find((x) => x.startsWith("📘"));
+  if (fbLine) await hubEvent(env, { run: job.id, step: "publish", status: /lỗi/i.test(fbLine) ? "error" : "done", title: fbLine });
+  const vLine = out.find((x) => x.startsWith("🎬"));
+  if (vLine) await hubEvent(env, { run: job.id, step: "video", status: /Không khởi động/.test(vLine) ? "error" : "start", title: vLine });
   await send(env, job.chat_id, out.join("\n"));
 }
 
@@ -418,6 +445,7 @@ export async function internal(request, env, url) {
     const { results = [] } = await request.json();
     const job = await getJob(env, id);
     if (job) {
+      await hubEvent(env, { run: job.id, step: "video", status: results.some((r) => /lỗi/i.test(r)) ? "error" : "done", title: (results.join(" · ") || "Luồng video đã chạy xong").slice(0, 280), detail: results.join("\n") });
       await send(env, job.chat_id, results.join("\n") || "Luồng video đã chạy xong.");
       // TikTok (hộp thư) không nhận nội dung qua API → gửi riêng caption dạng chạm-để-copy để dán khi bấm Đăng trong app
       const cap = job.content?.tiktok_caption;
@@ -575,8 +603,10 @@ async function pickIdeas(env, chat, q, arg) {
 async function runInsights(env, chat) {
   const fromCron = !chat;
   chat = chat || agentChat(env);
+  const RUN = `week-${dayKey()}`; env = { ...env, HUB_RUN: RUN, HUB_STEP: "weekly", HUB_LABEL: "Tự đánh giá tuần" };
+  await hubEvent(env, { run: RUN, step: "weekly", status: "start", runTitle: `Tự đánh giá tuần ${dayKey().split("-").reverse().join("/")}`, title: "Lấy số liệu fanpage, tự đánh giá, điều chỉnh chiến lược" });
   if (!chat) return;
-  try { await send(env, chat, await weeklyInsights(env, kvGet, kvSet), keyboard([[["↩️ Không áp dụng điều chỉnh", "sg:off"], ["✅ Áp dụng", "sg:on"]]])); if (fromCron) await env.JOBS.send({ type: "plan" }); }
+  try { const rep = await weeklyInsights(env, kvGet, kvSet); await hubEvent(env, { run: RUN, step: "weekly", status: "done", title: "Đã gửi báo cáo tuần và chiến lược mới", detail: rep }); await send(env, chat, rep, keyboard([[["↩️ Không áp dụng điều chỉnh", "sg:off"], ["✅ Áp dụng", "sg:on"]]])); if (fromCron) await env.JOBS.send({ type: "plan" }); }
   catch (e) { await send(env, chat, `📊 Báo cáo tuần bị lỗi: ${e.message}\n(Thường do Page token hết hạn – cần cấp lại token có quyền pages_read_engagement.)`); }
 }
 
@@ -689,18 +719,23 @@ const PICK_TOOL = {
 async function runDaily(env) {
   const chat = agentChat(env);
   if (!chat) return;
+  const RUN = `daily-${dayKey()}`;
+  env = { ...env, HUB_RUN: RUN, HUB_STEP: "scout", HUB_LABEL: "Dò tin & video" };
+  await hubEvent(env, { run: RUN, step: "scout", status: "start", runTitle: `Chọn bài ngày ${dayKey().split("-").reverse().join("/")}`, title: "Dò văn bản mới và video chính sách" });
   // 1) cập nhật kho ứng viên
   try { await runScout(env); } catch (e) { console.log("scout", e.message); }
   if (env.VIDEO_ENABLED !== "0") { try { await runVideoScout(env); } catch (e) { console.log("vscout", e.message); } }
   // 2) bám chỉ tiêu tuần
-  if (await kvGet(env, `day:${dayKey()}`)) return;
+  if (await kvGet(env, `day:${dayKey()}`)) return hubEvent(env, { run: RUN, step: "pick", status: "done", title: "Hôm nay đã có bài, không chọn thêm" });
   const st = await getStrategy(env, kvGet);
   const wk = JSON.parse((await kvGet(env, `week:${weekKey()}`)) || '{"fb":0,"video":0}');
   const target = st.weekly_targets || { fb_posts: 7, videos: 4 };
-  if (wk.fb >= target.fb_posts) return;
+  if (wk.fb >= target.fb_posts) return hubEvent(env, { run: RUN, step: "pick", status: "done", title: `Đã đủ chỉ tiêu tuần (${wk.fb}/${target.fb_posts} bài) – nghỉ đăng hôm nay` });
   const pool = JSON.parse((await kvGet(env, "pool")) || "[]").filter((x) => Date.now() - x.added < 7 * 86400e3);
-  if (!pool.length) return;
+  await hubEvent(env, { run: RUN, step: "scout", status: "done", title: `Kho có ${pool.length} ứng viên`, detail: pool.map((x) => `[${x.kind}] ${x.score}/10 · ${x.title}`).join("\n") });
+  if (!pool.length) return hubEvent(env, { run: RUN, step: "pick", status: "done", title: "Không có ứng viên nào hôm nay" });
   const today = VN_DAYS[vnNow().getUTCDay()];
+  hubTag(env, "pick", "Tổng biên tập chọn bài");
   const daysLeft = 7 - ((vnNow().getUTCDay() + 6) % 7);
   const recent = JSON.parse((await kvGet(env, "picks:recent")) || "[]");
   // 3) Tổng biên tập chọn 1 bài
@@ -726,6 +761,8 @@ async function runDaily(env) {
   await kvSet(env, `week:${weekKey()}`, JSON.stringify({ fb: wk.fb + 1, video: wk.video + (withVideo ? 1 : 0) }));
   await kvSet(env, "picks:recent", JSON.stringify([chosen.title, ...recent].slice(0, 10)));
   const meta = { with_video: withVideo, daily: true };
+  await hubEvent(env, { run: RUN, step: "pick", status: "done", title: `Chọn: ${chosen.title}${withVideo ? " (có video)" : ""}`,
+    detail: `LÝ DO: ${pick?.reason || "điểm cao nhất"}\nChỉ tiêu tuần: ${wk.fb + 1}/${target.fb_posts} bài, ${wk.video + (withVideo ? 1 : 0)}/${target.videos} video\n\nCÁC ỨNG VIÊN ĐÃ CÂN NHẮC:\n${[chosen, ...pool].map((x, i) => `${i === 0 ? "✔" : "·"} [${x.kind}] ${x.score}/10 · ${x.title}`).join("\n")}` });
   const head = `📰 Bài hôm nay (${wk.fb + 1}/${target.fb_posts} tuần này${withVideo ? " · có video" : ""}): ${chosen.title}\n💡 ${pick?.reason || "điểm cao nhất trong ngày"}\nEm đang soạn kỹ (Opus), xong gửi anh duyệt…`;
   // 5) soạn bằng model mạnh nhất – mỗi ngày chỉ 1 bài nên ưu tiên chất lượng
   if (chosen.kind === "video") {
