@@ -65,3 +65,26 @@ def hub(path, **body):
 
 Nguyên tắc: gửi nhật ký **không được làm hỏng agent** – luôn bọc try/except, timeout ngắn.
 Hub giữ dữ liệu 90 ngày.
+
+## Nhúng vào My THT (tự đăng nhập, chỉ Giám đốc/Quản trị)
+
+1. Tạo 1 chuỗi bí mật dài, đặt **cùng giá trị** làm Secret `HUB_EMBED_SECRET` ở **cả hai** worker: `tht-bantin` và My THT.
+2. My THT (máy chủ) – chỉ khi người dùng đã đăng nhập và có quyền quản trị – ký vé hạn 5 phút:
+
+```js
+// payload: { u: email, r: "admin", exp: giây Unix hiện tại + 300 }
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+async function hubTicket(env, user) {
+  const body = b64u(new TextEncoder().encode(JSON.stringify({ u: user.email, r: "admin", exp: Math.floor(Date.now() / 1000) + 300 })));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.HUB_EMBED_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return body + "." + b64u(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)));
+}
+```
+
+3. Trang "Agent Hub" trong My THT chỉ là một khung:
+
+```html
+<iframe src="https://tht-bantin.thtdn.workers.dev/hub/?t=VÉ_VỪA_KÝ" style="width:100%;height:calc(100vh - 60px);border:0"></iframe>
+```
+
+Hub đổi vé lấy phiên xem 12 giờ, ẩn thanh tiêu đề riêng. Vé sai/hết hạn hoặc vai trò không phải quản trị → bị từ chối. Mở link `/hub` trực tiếp vẫn hỏi mật khẩu ứng dụng.

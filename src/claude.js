@@ -14,8 +14,7 @@ export const modelFor = (env, quality) =>
   : quality === "cheap" ? env.CLAUDE_MODEL_CHEAP || "claude-haiku-5-5"
   : env.CLAUDE_MODEL || "claude-sonnet-5-5";
 
-export async function claude(env, body) {
-  if (!env.ANTHROPIC_API_KEY) throw new Error("Chưa cấu hình ANTHROPIC_API_KEY");
+async function callApi(env, body) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -25,6 +24,36 @@ export async function claude(env, body) {
   if (!res.ok) throw new Error(`Claude báo lỗi: ${data.error?.message || res.status}`);
   await hubAI(env, body.model, data.usage, env.HUB_LABEL);
   return data;
+}
+
+// Sonnet/Opus 5.5 trở lên: không nhận tool_choice "tool"/"any", luôn có suy nghĩ thích ứng (tính vào max_tokens).
+// → đổi sang "auto" + dặn rõ trong lời nhắn; nếu model vẫn chưa gọi công cụ thì nhắc lại 1 lần.
+const noForcedTools = (model) => !/haiku/i.test(String(model || ""));
+const nudge = (name) => `\n\n[Yêu cầu bắt buộc: trả lời bằng cách gọi công cụ \`${name}\` đúng một lần, không viết câu trả lời dạng văn bản.]`;
+function withNudge(messages, name) {
+  const msgs = messages.map((m) => ({ ...m }));
+  const last = msgs[msgs.length - 1];
+  if (last && last.role === "user") {
+    last.content = typeof last.content === "string" ? last.content + nudge(name)
+      : [...last.content, { type: "text", text: nudge(name).trim() }];
+  }
+  return msgs;
+}
+
+export async function claude(env, body) {
+  if (!env.ANTHROPIC_API_KEY) throw new Error("Chưa cấu hình ANTHROPIC_API_KEY");
+  const forced = body.tool_choice && ["tool", "any"].includes(body.tool_choice.type) ? body.tool_choice : null;
+  if (!noForcedTools(body.model)) return callApi(env, body);
+  const req = { ...body, max_tokens: Math.max(body.max_tokens || 0, 16000) }; // chừa chỗ cho phần suy nghĩ
+  if (!forced) return callApi(env, req);
+  const name = forced.name || (body.tools || []).find((t) => t.name && !t.type)?.name || "";
+  req.tool_choice = { type: "auto" };
+  req.messages = withNudge(body.messages, name);
+  const first = await callApi(env, req);
+  const called = first.content?.some((b) => b.type === "tool_use" && (!forced.name || b.name === forced.name));
+  if (called || first.stop_reason === "pause_turn") return first;
+  // Nhắc lại một lần trong cùng hội thoại (giữ nguyên các khối suy nghĩ đã trả về)
+  return callApi(env, { ...req, messages: [...req.messages, { role: "assistant", content: first.content }, { role: "user", content: `Gọi công cụ \`${name}\` ngay bây giờ với đầy đủ nội dung.` }] });
 }
 
 // parts: [{kind:"pdf"|"image"|"text", name, mediaType, data}]

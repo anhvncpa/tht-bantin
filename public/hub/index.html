@@ -70,6 +70,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10
 .login input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;margin:12px 0}
 .empty{padding:28px;text-align:center;color:var(--muted)}
 .err-msg{color:var(--err);font-size:13px}
+.embed body,.embed{background:transparent}.embed .wrap{max-width:none;padding:12px}.embed .logo,.embed #out{display:none}.embed header{margin-bottom:12px}
 @media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.hide-sm{display:none}}
 </style>
 </head>
@@ -80,7 +81,11 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const store = { get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }, set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (_) {} } };
-  let KEY = store.get("thtHubKey") || "", timer = null, cache = {};
+  let KEY = store.get("thtHubKey") || "", SESSION = "", timer = null, cache = {};
+  // Nhúng trong My THT: ?t=<vé> → đổi lấy phiên, ẩn thanh tiêu đề, không hỏi mật khẩu
+  const qs = new URLSearchParams(location.search), TICKET = qs.get("t"), EMBED = qs.has("embed") || window.self !== window.top;
+  if (EMBED) document.documentElement.classList.add("embed");
+  try { SESSION = sessionStorage.getItem("thtHubSession") || ""; } catch (_) {}
   const ST = { running: ["Đang chạy", "s-running"], start: ["Đang chạy", "s-running"], waiting: ["Chờ anh duyệt", "s-waiting"], done: ["Xong", "s-done"], error: ["Lỗi", "s-error"], idle: ["Nghỉ", "s-idle"] };
   const SI = { start: "▶️", done: "✅", waiting: "⏳", error: "⛔", info: "ℹ️", ai: "🧠" };
   const pill = (st) => { const [t, c] = ST[st] || ST.idle; return `<span class="pill ${c}"><span class="dot"></span>${t}</span>`; };
@@ -91,8 +96,8 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10
   const stepLabel = (a, id) => (steps(a).find((s) => s.id === id) || {}).label || id || "";
 
   async function api(path) {
-    const r = await fetch("/hub/api" + path, { headers: { "x-app-key": KEY } });
-    if (r.status === 401) { KEY = ""; store.set("thtHubKey", null); render(); throw new Error("auth"); }
+    const r = await fetch("/hub/api" + path, { headers: SESSION ? { "x-hub-session": SESSION } : { "x-app-key": KEY } });
+    if (r.status === 401) { if (SESSION) { SESSION = ""; try { sessionStorage.removeItem("thtHubSession"); } catch (_) {} } else { KEY = ""; store.set("thtHubKey", null); } render(); throw new Error("auth"); }
     const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
   }
 
@@ -100,7 +105,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10
     return `<header><a class="logo" href="#/"><span class="b">THT</span>Agent Hub</a><span class="muted small hide-sm">${esc(sub || "Theo dõi các AI Agent của THT")}</span>
       <span class="spacer"></span><span class="muted small hide-sm" id="upd"></span><button class="btn" id="rf" title="Làm mới">↻</button><button class="btn" id="out">Thoát</button></header>${inner}`;
   }
-  function bindShell() { $("#rf").onclick = () => route(); $("#out").onclick = () => { store.set("thtHubKey", null); KEY = ""; render(); }; $("#upd").textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  function bindShell() { $("#rf").onclick = () => route(); $("#out").onclick = () => { store.set("thtHubKey", null); KEY = ""; SESSION = ""; try { sessionStorage.removeItem("thtHubSession"); } catch (_) {} render(); }; $("#upd").textContent = "Cập nhật " + new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 
   function login() {
     $("#app").innerHTML = `<div class="card login"><div class="logo" style="margin-bottom:6px"><span class="b">THT</span>Agent Hub</div>
@@ -166,9 +171,19 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10
     bindShell();
   }
 
+  async function exchange() {
+    try {
+      const r = await fetch("/hub/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ t: TICKET }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status);
+      SESSION = j.session; try { sessionStorage.setItem("thtHubSession", SESSION); } catch (_) {}
+      history.replaceState(null, "", location.pathname + (EMBED ? "?embed" : "") + location.hash);
+      return true;
+    } catch (e) { $("#app").innerHTML = `<div class="card empty">${esc(e.message)}. Anh tải lại trang My THT để thử lại.</div>`; return false; }
+  }
   async function route() {
     clearTimeout(timer);
-    if (!KEY) return login();
+    if (TICKET && !SESSION && !(await exchange())) return;
+    if (!KEY && !SESSION) return login();
     const h = location.hash.replace(/^#\/?/, ""); let m;
     try {
       if ((m = h.match(/^agent\/(.+)$/))) await agentView(m[1]);

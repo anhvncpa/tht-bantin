@@ -110,13 +110,19 @@ export async function handleUpdate(update, env) {
       "• Gửi nhiều ảnh cùng lúc (album) = 1 bài. Gửi thêm ảnh sau đó vẫn cộng vào bài đang làm; muốn sang bài khác gõ /moi.\n" +
       "• Poster mặc định song ngữ Việt – Anh, bài Facebook có phần English below. Bấm 🌐 VI⇄EN để đổi sang chỉ tiếng Việt.\n" +
       (group ? "• Trong nhóm bot: gửi file/ảnh là bot nhận luôn. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
-      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /baocao báo cáo fanpage · /lich lịch đăng · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
+      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /baocao báo cáo fanpage · /lich lịch đăng · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
   }
   if (cmd === "/quet") {
     await send(env, chat, "🤖 Đang quét các trang Cục Thuế, Bộ Tài chính, VACPA, Chính phủ… (2–4 phút)");
     return env.JOBS.send({ type: "scout", chat, manual: true });
   }
   if (cmd === "/lich") return send(env, chat, await scheduleList(env));
+  if (cmd === "/soanlai") {
+    const r = await env.DB.prepare("SELECT id FROM jobs WHERE chat_id = ? AND content IS NULL AND status IN ('working','review') ORDER BY created_at DESC LIMIT 1").bind(chat).first();
+    if (!r) return send(env, chat, "Không có bài nào đang bị lỗi để soạn lại.");
+    await send(env, chat, "🔁 Đang soạn lại bài bị lỗi gần nhất…");
+    return env.JOBS.send({ type: "generate", jobId: r.id });
+  }
   if (cmd === "/video") {
     await send(env, chat, "🎬 Đang tìm video chính sách mới từ Báo Chính phủ, Cục Thuế, Bộ Tài chính, VTV… (2–4 phút)");
     return env.JOBS.send({ type: "vscout", chat, manual: true });
@@ -226,6 +232,7 @@ async function onButton(q, env) {
     return env.JOBS.send({ type: "generate", jobId: id });
   }
   if (act === "rs") return send(env, chat, "Chọn mẫu khác:", styleKb(id));
+  if (act === "rg") { await clearKb(); await send(env, chat, "🔁 Đang soạn lại…"); return env.JOBS.send({ type: "generate", jobId: id }); }
   if (act === "ed") { await kvSet(env, editKey(chat, uid), id); return send(env, chat, "Anh nhắn yêu cầu sửa (vd: “đổi tiêu đề thành…”, “gộp còn 1 trang”, “thêm thời hạn 30 ngày”)."); }
   if (act === "bi") {
     if (!job.content) return;
@@ -287,7 +294,7 @@ export async function processTask(task, env) {
   } catch (e) {
     console.error(e);
     await hubEvent(env, { run: job.id, step: env.HUB_STEP || task.type, status: "error", title: `Lỗi: ${e.message}`, detail: String(e.stack || e).slice(0, 2000) });
-    await send(env, job.chat_id, `Có lỗi: ${e.message}\nAnh thử lại, hoặc /moi để làm lại.`, reviewKbIfReady(job));
+    await send(env, job.chat_id, `Có lỗi: ${e.message}\nAnh thử lại, hoặc /moi để làm lại.`, job.content ? reviewKb(job.id) : keyboard([[["🔁 Soạn lại", `rg:${job.id}`]]]));
   }
 }
 const reviewKbIfReady = (job) => (job.content ? reviewKb(job.id) : {});

@@ -75,6 +75,32 @@ export async function hubAI(env, model, usage, label) {
     title: `${label || "Gọi AI"} · ${short} · ${(usage?.input_tokens || 0) + (usage?.cache_read_input_tokens || 0)}→${usage?.output_tokens || 0} token · $${cost.toFixed(3)}` });
 }
 
+// ---------------- Đăng nhập nhúng từ My THT (không cần gõ mật khẩu) ----------------
+// My THT (đã đăng nhập, quyền quản trị) ký 1 vé ngắn hạn bằng HUB_EMBED_SECRET → Hub đổi vé lấy phiên 12 giờ.
+// Vé: base64url(JSON {u, r, exp}) + "." + base64url(HMAC-SHA256(secret, phần trước))
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function hmac(secret, data) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64u(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data)));
+}
+export async function signTicket(secret, payload) {
+  const body = b64u(new TextEncoder().encode(JSON.stringify(payload)));
+  return `${body}.${await hmac(secret, body)}`;
+}
+async function verifyTicket(secret, t) {
+  if (!secret || !t || !t.includes(".")) return null;
+  const [body, sig] = t.split(".");
+  if (!same(sig, await hmac(secret, body))) return null;
+  try { const p = JSON.parse(new TextDecoder().decode(fromB64u(body))); return p.exp > Date.now() / 1000 ? p : null; } catch (_) { return null; }
+}
+const ADMIN_ROLES = /^(admin|owner|director|giamdoc|quantri|quản trị|giám đốc)$/i;
+async function viewer(request, env) {
+  if (same(request.headers.get("x-app-key"), env.APP_PASSWORD)) return { u: "mat-khau-ung-dung" };
+  const p = await verifyTicket(env.HUB_EMBED_SECRET, request.headers.get("x-hub-session"));
+  return p && p.kind === "session" ? p : null;
+}
+
 // ---------------- API cho trang /hub và agent bên ngoài ----------------
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const same = (a, b) => { a = String(a || ""); b = String(b || ""); if (!a || a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
@@ -99,8 +125,17 @@ export async function hubRoutes(request, env, url) {
     await hubEvent(env, b);
     return J({ ok: true });
   }
-  // Trang xem: dùng mật khẩu ứng dụng
-  if (!same(request.headers.get("x-app-key"), env.APP_PASSWORD)) return J({ error: "Sai mật khẩu" }, 401);
+  // Đổi vé My THT lấy phiên xem 12 giờ (chỉ tài khoản quản trị)
+  if (request.method === "POST" && path === "/session") {
+    const { t } = await request.json().catch(() => ({}));
+    const p = await verifyTicket(env.HUB_EMBED_SECRET, t);
+    if (!p || p.kind === "session") return J({ error: "Vé đăng nhập không hợp lệ hoặc đã hết hạn" }, 401);
+    if (!ADMIN_ROLES.test(String(p.r || ""))) return J({ error: "Chỉ Giám đốc/Quản trị được xem Agent Hub" }, 403);
+    const session = await signTicket(env.HUB_EMBED_SECRET, { kind: "session", u: p.u, r: p.r, exp: Math.floor(Date.now() / 1000) + 12 * 3600 });
+    return J({ session, user: p.u });
+  }
+  // Trang xem: mật khẩu ứng dụng (mở trực tiếp) hoặc phiên từ My THT (nhúng)
+  if (!(await viewer(request, env))) return J({ error: "Sai mật khẩu" }, 401);
   const DB = env.DB;
   if (path === "/overview") {
     const day = new Date(Date.now() - 86400e3).toISOString();
