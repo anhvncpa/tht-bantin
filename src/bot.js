@@ -13,6 +13,22 @@ import { scoutVideos, videoSource, findVideoUrl } from "./videoscout.js";
 import { withStrategy, tagJob, markPublished, getStrategy } from "./strategy.js";
 import { claude, modelFor, hubTag } from "./claude.js";
 import { hubEvent } from "./hub.js";
+import { postInstagram, igCaption, postThreads, mediaUrl, igUserId } from "./social.js";
+import { researchTrends, trendMessage } from "./trends.js";
+
+// Kênh đăng: "all" = bài ảnh/chữ, "allv" = kèm các kênh video (dựng trên GitHub Actions)
+const POST_TARGETS = (env) => list(env.POST_TARGETS || "fb,story,ig,threads");
+const VIDEO_TARGETS = (env) => list(env.VIDEO_TARGETS || "tiktok,youtube,reels,igreels");
+const VIDEO_KINDS = ["story", "tiktok", "youtube", "reels", "igreels"];
+function expandTargets(env, arg) {
+  const out = [];
+  for (const t of String(arg || "").split(",")) {
+    if (t === "all") out.push(...POST_TARGETS(env));
+    else if (t === "allv") out.push(...POST_TARGETS(env), ...VIDEO_TARGETS(env));
+    else if (t) out.push(t);
+  }
+  return [...new Set(out)];
+}
 
 const now = () => new Date().toISOString();
 const URL_RE = /https?:\/\/\S+/;
@@ -31,8 +47,8 @@ async function saveJob(env, j) {
       JSON.stringify(j.files || []), j.content ? JSON.stringify(j.content) : null, j.checks || "", j.render ? JSON.stringify(j.render) : null,
       j.media_group || null, j.created_at || now(), now()).run();
 }
-const kvGet = async (env, k) => (await env.DB.prepare("SELECT v FROM kv WHERE k = ?").bind(k).first())?.v ?? null;
-const kvSet = (env, k, v) => env.DB.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v).run();
+export const kvGet = async (env, k) => (await env.DB.prepare("SELECT v FROM kv WHERE k = ?").bind(k).first())?.v ?? null;
+export const kvSet = (env, k, v) => env.DB.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v).run();
 const kvDel = (env, k) => env.DB.prepare("DELETE FROM kv WHERE k = ?").bind(k).run();
 async function openJob(env, chatId) {
   const r = await env.DB.prepare("SELECT id FROM jobs WHERE chat_id = ? AND status = 'collecting' ORDER BY created_at DESC LIMIT 1").bind(chatId).first();
@@ -56,8 +72,9 @@ const pagesKb = (id) => keyboard([
   [["Tự động", `pg:${id}:auto`], ["1 trang", `pg:${id}:1`], ["2 trang", `pg:${id}:2`], ["3 trang", `pg:${id}:3`]],
 ]);
 const reviewKb = (id, video = true) => keyboard([
-  [[video ? "✅ Đăng ngay (+video)" : "✅ Đăng ngay", `pub:${id}:fb,story${video ? ",tiktok,youtube" : ""}`], ["⏰ Hẹn giờ", `sh:${id}`], ["✉️ Thư", `lm:${id}`], ["🌐 VI⇄EN", `bi:${id}`]],
-  [["📘 FB", `pub:${id}:fb`], ["📱 Story", `pub:${id}:story`], ["🎵 TikTok", `pub:${id}:tiktok`], ["▶️ YouTube", `pub:${id}:youtube`]],
+  [[video ? "✅ Đăng 5 kênh (+video)" : "✅ Đăng ngay", `pub:${id}:${video ? "allv" : "all"}`], ["⏰ Hẹn giờ", `sh:${id}`], ["✉️ Thư", `lm:${id}`], ["🌐 VI⇄EN", `bi:${id}`]],
+  [["📘 FB", `pub:${id}:fb`], ["📱 Story", `pub:${id}:story`], ["📸 Instagram", `pub:${id}:ig`], ["🧵 Threads", `pub:${id}:threads`]],
+  [["🎵 TikTok", `pub:${id}:tiktok`], ["▶️ YouTube", `pub:${id}:youtube`], ["🎞 FB Reels", `pub:${id}:reels`], ["🎞 IG Reels", `pub:${id}:igreels`]],
   [["✏️ Sửa", `ed:${id}`], ["🎨 Mẫu", `rs:${id}`], ["🧠 Soạn kỹ", `hq:${id}`], ["❌ Huỷ", `x:${id}`]],
 ]);
 // Hẹn đăng vào giờ vàng (FB bài viết + Story theo AGENT_TARGETS)
@@ -65,7 +82,8 @@ const schedKb = (env, id) => keyboard([
   nextSlots(env, 3).map((at) => [`⏰ ${vnLabel(at)}`, `sc:${id}:${Math.round(at / 60000)}`]),
   [["🚫 Không hẹn", `uc:${id}`]],
 ]);
-const targetsLabel = (t) => t.split(",").map((x) => ({ fb: "FB bài viết", story: "FB Story", tiktok: "TikTok", youtube: "YouTube" }[x] || x)).join(" + ");
+const TARGET_NAMES = { fb: "FB bài viết", story: "FB Story", ig: "Instagram", threads: "Threads", tiktok: "TikTok", youtube: "YouTube", reels: "FB Reels", igreels: "IG Reels", all: "5 kênh (bài)", allv: "5 kênh + video" };
+const targetsLabel = (t) => String(t).split(",").map((x) => TARGET_NAMES[x] || x).join(" + ");
 // Thư tư vấn chỉ làm khi người dùng bấm chọn (mặc định không làm, không tốn API)
 const letterKb = (id) => keyboard([
   [["📝 Chỉ text", `lt:${id}:text`], ["Word VI", `lt:${id}:VI`], ["VI–EN", `lt:${id}:VI-EN`]],
@@ -110,7 +128,7 @@ export async function handleUpdate(update, env) {
       "• Gửi nhiều ảnh cùng lúc (album) = 1 bài. Gửi thêm ảnh sau đó vẫn cộng vào bài đang làm; muốn sang bài khác gõ /moi.\n" +
       "• Poster mặc định song ngữ Việt – Anh, bài Facebook có phần English below. Bấm 🌐 VI⇄EN để đổi sang chỉ tiếng Việt.\n" +
       (group ? "• Trong nhóm bot: gửi file/ảnh là bot nhận luôn. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
-      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /baocao báo cáo fanpage · /lich lịch đăng · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
+      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /lich lịch đăng · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
   }
   if (cmd === "/quet") {
     await send(env, chat, "🤖 Đang quét các trang Cục Thuế, Bộ Tài chính, VACPA, Chính phủ… (2–4 phút)");
@@ -127,6 +145,7 @@ export async function handleUpdate(update, env) {
     await send(env, chat, "🎬 Đang tìm video chính sách mới từ Báo Chính phủ, Cục Thuế, Bộ Tài chính, VTV… (2–4 phút)");
     return env.JOBS.send({ type: "vscout", chat, manual: true });
   }
+  if (cmd === "/xuhuong") { await send(env, chat, "📈 Đang nghiên cứu xu hướng tuần (1–3 phút)…"); return env.JOBS.send({ type: "trends", chat }); }
   if (cmd === "/kehoach") { await send(env, chat, "🗓 Đang lập kế hoạch nội dung tuần (2–4 phút)…"); return env.JOBS.send({ type: "plan", chat }); }
   if (cmd === "/baocao") { await send(env, chat, "📊 Đang lấy số liệu fanpage…"); return env.JOBS.send({ type: "insights", chat }); }
   if (cmd === "/moi" || cmd === "/bantin") {
@@ -247,9 +266,9 @@ async function onButton(q, env) {
     await tg(env, "editMessageText", { chat_id: chat, message_id: q.message.message_id, text: `✉️ Đang soạn thư tư vấn: ${LETTER_KINDS[arg]}…` });
     return env.JOBS.send({ type: "word", jobId: id, kind: arg });
   }
-  if (act === "sh") return send(env, chat, `⏰ Chọn giờ đăng (${targetsLabel(env.AGENT_TARGETS || "fb,story")}):`, schedKb(env, id));
+  if (act === "sh") return send(env, chat, `⏰ Chọn giờ đăng (${targetsLabel(env.AGENT_TARGETS || POST_TARGETS(env).join(","))}${(await wantsVideo(env, id)) ? " + video" : ""}):`, schedKb(env, id));
   if (act === "sc") {
-    const at = Number(arg) * 60000, targets = (env.AGENT_TARGETS || "fb,story") + ((await wantsVideo(env, id)) ? ",tiktok,youtube" : "");
+    const at = Number(arg) * 60000, targets = expandTargets(env, (env.AGENT_TARGETS || "all") + ((await wantsVideo(env, id)) ? "," + VIDEO_TARGETS(env).join(",") : "")).join(",");
     await kvSet(env, `sched:${id}`, JSON.stringify({ at, targets }));
     await hubEvent(env, { run: id, step: "review", status: "waiting", title: `Anh duyệt, hẹn đăng ${targetsLabel(targets)} lúc ${vnLabel(at)}` });
     job.status = "scheduled"; await saveJob(env, job);
@@ -261,7 +280,7 @@ async function onButton(q, env) {
     return tg(env, "editMessageText", { chat_id: chat, message_id: q.message.message_id, text: "Đã huỷ hẹn giờ cho bài này." });
   }
   if (act === "x") { await hubEvent(env, { run: id, step: "review", status: "done", title: "Anh đã huỷ bài này" }); await clearKb(); job.status = "cancelled"; await saveJob(env, job); return send(env, chat, "Đã huỷ bài này."); }
-  if (act === "pub") { await hubEvent(env, { run: id, step: "review", status: "done", title: `Anh duyệt: đăng ngay → ${targetsLabel(arg)}` }); await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: arg.split(",") }); }
+  if (act === "pub") { await hubEvent(env, { run: id, step: "review", status: "done", title: `Anh duyệt: đăng ngay → ${targetsLabel(arg)}` }); await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: expandTargets(env, arg) }); }
 }
 
 // ---------------- queue tasks (slow work) ----------------
@@ -282,6 +301,7 @@ export async function processTask(task, env) {
     return hubEvent(env, { run: RUN, step: "scout", status: "done", title: `Kho hiện có ${pool.length} ứng viên`, detail: pool.map((x) => `[${x.kind}] ${x.score}/10 · ${x.title}`).join("\n") });
   }
   if (task.type === "insights") return runInsights(env, task.chat);
+  if (task.type === "trends") return runTrends(env, task.chat, task.thenPlan);
   const job = await getJob(env, task.jobId);
   if (!job) return;
   env = { ...env, HUB_RUN: job.id };
@@ -392,7 +412,23 @@ async function publish(env, job, targets) {
       } catch (e) { out.push(`📘 Facebook lỗi: ${e.message}`); }
     }
   }
-  const video = targets.filter((t) => ["story", "tiktok", "youtube"].includes(t));
+  const shared = Boolean(job.content?.share?.url);
+  if (targets.includes("ig")) {
+    if (dry) out.push("📸 Instagram: chế độ thử, chưa đăng");
+    else if (shared) out.push("📸 Instagram: bỏ qua (bài chia sẻ link video không đăng được lên Instagram)");
+    else {
+      try { out.push(`📸 Instagram: ${await postInstagram(env, job, igCaption(fbCaption(job.content, env)), kvGet, kvSet)}`); }
+      catch (e) { out.push(`📸 Instagram lỗi: ${e.message}`); }
+    }
+  }
+  if (targets.includes("threads")) {
+    if (dry) out.push("🧵 Threads: chế độ thử, chưa đăng");
+    else {
+      try { out.push(`🧵 Threads: ${await postThreads(env, job, kvGet, kvSet)}`); }
+      catch (e) { out.push(/Chưa kết nối/.test(e.message) ? `🧵 Threads: bỏ qua – ${e.message}` : `🧵 Threads lỗi: ${e.message}`); }
+    }
+  }
+  const video = targets.filter((t) => VIDEO_KINDS.includes(t));
   if (video.length) {
     try {
       await dispatchVideo(env, job.id, video);
@@ -401,8 +437,8 @@ async function publish(env, job, targets) {
   }
   job.status = "published";
   await saveJob(env, job);
-  const fbLine = out.find((x) => x.startsWith("📘"));
-  if (fbLine) await hubEvent(env, { run: job.id, step: "publish", status: /lỗi/i.test(fbLine) ? "error" : "done", title: fbLine });
+  const postLines = out.filter((x) => /^(📘|📸|🧵)/.test(x));
+  if (postLines.length) await hubEvent(env, { run: job.id, step: "publish", status: postLines.some((x) => /lỗi/i.test(x)) ? "error" : "done", title: postLines.join(" · ").slice(0, 280), detail: postLines.join("\n") });
   const vLine = out.find((x) => x.startsWith("🎬"));
   if (vLine) await hubEvent(env, { run: job.id, step: "video", status: /Không khởi động/.test(vLine) ? "error" : "start", title: vLine });
   await send(env, job.chat_id, out.join("\n"));
@@ -433,6 +469,9 @@ export async function internal(request, env, url) {
       youtube_title: c.youtube_title, youtube_description: c.youtube_description, youtube_tags: c.youtube_tags || [],
       hashtags: c.hashtags || [], tiktok_mode: env.TIKTOK_MODE || "inbox", tiktok_privacy: env.TIKTOK_PRIVACY || "SELF_ONLY",
       youtube_privacy: env.YOUTUBE_PRIVACY || "private",
+      video_url: await mediaUrl(env, job.id, "story.mp4"),
+      reels_caption: fbCaption(c, env), ig_caption: igCaption(fbCaption(c, env)),
+      ig_user_id: await igUserId(env, kvGet, kvSet).catch(() => ""),
     });
   }
   if (what === "file") {
@@ -456,7 +495,7 @@ export async function internal(request, env, url) {
       await send(env, job.chat_id, results.join("\n") || "Luồng video đã chạy xong.");
       // TikTok (hộp thư) không nhận nội dung qua API → gửi riêng caption dạng chạm-để-copy để dán khi bấm Đăng trong app
       const cap = job.content?.tiktok_caption;
-      if (cap && results.some((r) => r.startsWith("🎵 TikTok:"))) {
+      if (cap && results.some((r) => r.startsWith("🎵 TikTok:") && r.includes("hộp thư"))) {
         const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         await send(env, job.chat_id, "📋 Nội dung đăng TikTok – chạm vào khung dưới để copy, rồi dán vào ô mô tả khi bấm Đăng:");
         await send(env, job.chat_id, `<code>${esc(cap.slice(0, 3800))}</code>`, { parse_mode: "HTML" });
@@ -510,6 +549,9 @@ export async function setupWebhook(url, env) {
   await tg(env, "setMyCommands", { commands: [
     { command: "moi", description: "Bắt đầu bài mới" },
     { command: "bantin", description: "Bài mới (dùng trong nhóm)" },
+    { command: "xuhuong", description: "Nghiên cứu xu hướng tuần" },
+    { command: "kehoach", description: "Kế hoạch nội dung tuần" },
+    { command: "baocao", description: "Báo cáo các kênh" },
     { command: "id", description: "Xem ID Telegram / ID nhóm" },
     { command: "help", description: "Hướng dẫn" },
   ] });
@@ -557,7 +599,7 @@ async function runDue(env) {
     const job = await getJob(env, r.k.slice(6));
     if (!job || !job.content || !job.render) continue;
     await send(env, job.chat_id, `⏰ Đến giờ vàng – đang đăng: ${job.content.title_line1 || job.id}`);
-    try { await publish(env, job, it.targets.split(",")); } catch (e) { await send(env, job.chat_id, `Đăng theo lịch bị lỗi: ${e.message}`); }
+    try { await publish(env, job, expandTargets(env, it.targets)); } catch (e) { await send(env, job.chat_id, `Đăng theo lịch bị lỗi: ${e.message}`); }
   }
 }
 
@@ -613,10 +655,28 @@ async function runInsights(env, chat) {
   const RUN = `week-${dayKey()}`; env = { ...env, HUB_RUN: RUN, HUB_STEP: "weekly", HUB_LABEL: "Tự đánh giá tuần" };
   await hubEvent(env, { run: RUN, step: "weekly", status: "start", runTitle: `Tự đánh giá tuần ${dayKey().split("-").reverse().join("/")}`, title: "Lấy số liệu fanpage, tự đánh giá, điều chỉnh chiến lược" });
   if (!chat) return;
-  try { const rep = await weeklyInsights(env, kvGet, kvSet); await hubEvent(env, { run: RUN, step: "weekly", status: "done", title: "Đã gửi báo cáo tuần và chiến lược mới", detail: rep }); await send(env, chat, rep, keyboard([[["↩️ Không áp dụng điều chỉnh", "sg:off"], ["✅ Áp dụng", "sg:on"]]])); if (fromCron) await env.JOBS.send({ type: "plan" }); }
+  try { const rep = await weeklyInsights(env, kvGet, kvSet); await hubEvent(env, { run: RUN, step: "weekly", status: "done", title: "Đã gửi báo cáo tuần và chiến lược mới", detail: rep }); await send(env, chat, rep, keyboard([[["↩️ Không áp dụng điều chỉnh", "sg:off"], ["✅ Áp dụng", "sg:on"]]])); if (fromCron) await env.JOBS.send({ type: "trends", thenPlan: true }); }
   catch (e) { await send(env, chat, `📊 Báo cáo tuần bị lỗi: ${e.message}\n(Thường do Page token hết hạn – cần cấp lại token có quyền pages_read_engagement.)`); }
 }
 
+
+// Agent tự nghiên cứu xu hướng (CN tối sau báo cáo tuần, rồi lập kế hoạch tuần; hoặc /xuhuong)
+async function runTrends(env, chat, thenPlan = false) {
+  const silent = !chat;
+  chat = chat || agentChat(env);
+  const RUN = `week-${dayKey()}`; env = { ...env, HUB_RUN: RUN, HUB_STEP: "trend", HUB_LABEL: "Nghiên cứu xu hướng" };
+  await hubEvent(env, { run: RUN, step: "trend", status: "start", title: "Tìm chủ đề nóng, hạn chót, kiểu video đang hiệu quả" });
+  try {
+    const t = await researchTrends(env, kvGet, kvSet);
+    const msg = trendMessage(t);
+    await hubEvent(env, { run: RUN, step: "trend", status: "done", title: `Xu hướng: ${(t.hot_topics || []).map((x) => x.topic).slice(0, 3).join(" · ")}`.slice(0, 280), detail: msg });
+    if (chat && (!silent || thenPlan)) await send(env, chat, msg);
+  } catch (e) {
+    await hubEvent(env, { run: RUN, step: "trend", status: "error", title: `Nghiên cứu xu hướng lỗi: ${e.message}` });
+    if (chat && !silent) await send(env, chat, `📈 Nghiên cứu xu hướng bị lỗi: ${e.message}`);
+  }
+  if (thenPlan) await env.JOBS.send({ type: "plan" });
+}
 
 // ---------------- Album nhiều ảnh = 1 bài ----------------
 function addCaption(job, cap) {
@@ -754,7 +814,7 @@ async function runDaily(env) {
       system: "Bạn là Tổng biên tập fanpage THT Audit. Mỗi ngày chỉ đăng 1 bài, nên chọn bài hữu ích và kịp thời nhất cho chủ doanh nghiệp và kế toán: ưu tiên văn bản mới có hạn chót/mức phạt/ưu đãi; tránh trùng chủ đề với bài vừa đăng; xen kẽ loại bài cho phong phú. Ý tưởng kế hoạch đúng ngày hôm nay được cộng điểm. Gọi pick_today đúng một lần.",
       tools: [PICK_TOOL], tool_choice: { type: "tool", name: "pick_today" },
       messages: [{ role: "user", content: `Hôm nay: ${today}. Còn ${daysLeft} ngày trong tuần.\nChỉ tiêu tuần: ${target.fb_posts} bài FB (đã soạn ${wk.fb}), ${target.videos} video (đã soạn ${wk.video}).\n` +
-        `Bài gần đây (tránh trùng): ${recent.join(" | ") || "(chưa có)"}\n${env.STRATEGY_NOTES ? "Định hướng tuần: " + env.STRATEGY_NOTES + "\n" : ""}\nỨng viên:\n${list}` }] });
+        `Bài gần đây (tránh trùng): ${recent.join(" | ") || "(chưa có)"}\n${env.STRATEGY_NOTES ? "Định hướng tuần: " + env.STRATEGY_NOTES + "\n" : ""}${env.TREND_NOTES ? "Xu hướng tuần: " + env.TREND_NOTES + "\n" : ""}\nỨng viên:\n${list}` }] });
     pick = msg.content.find((b) => b.type === "tool_use")?.input;
   } catch (e) { console.log("pick", e.message); }
   let idx = Number.isInteger(pick?.index) && pool[pick.index] ? pick.index : pool.reduce((b, x, i) => (x.score > pool[b].score ? i : b), 0);

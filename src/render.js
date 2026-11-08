@@ -43,7 +43,7 @@ export function pageDocument(style, content, env, qrUrl, index, mode = "a4") {
   return `${head}<style>html,body{margin:0;background:${bg}}</style></head><body>${inner}${FIT_SCRIPT}</body></html>`;
 }
 
-export async function screenshot(env, html, width, height) {
+export async function screenshot(env, html, width, height, format = "png") {
   if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) throw new Error("Chưa cấu hình CF_ACCOUNT_ID / CF_API_TOKEN cho Browser Rendering");
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/browser-rendering/screenshot`, {
     method: "POST",
@@ -53,7 +53,7 @@ export async function screenshot(env, html, width, height) {
       viewport: { width, height, deviceScaleFactor: 2 },
       gotoOptions: { waitUntil: "networkidle0", timeout: 30000 },
       waitForSelector: { selector: "body[data-ready]", timeout: 15000 },
-      screenshotOptions: { type: "png", fullPage: false },
+      screenshotOptions: format === "jpeg" ? { type: "jpeg", quality: 92, fullPage: false } : { type: "png", fullPage: false },
     }),
   });
   const type = res.headers.get("content-type") || "";

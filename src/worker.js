@@ -9,6 +9,8 @@ import { postToPage } from "./facebook.js";
 import { brandOf } from "./render.js";
 import { handleUpdate, processTask, internal, tiktokRoutes, setupWebhook } from "./bot.js";
 import { hubRoutes } from "./hub.js";
+import { serveMedia, threadsRoutes } from "./social.js";
+import { kvGet, kvSet } from "./bot.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
@@ -26,6 +28,8 @@ export default {
       }
       if (url.pathname === "/tg/setup") return await setupWebhook(url, env);
       if (url.pathname.startsWith("/tiktok/")) return await tiktokRoutes(url, env);
+      if (url.pathname.startsWith("/m/")) return await serveMedia(url, env);
+      if (url.pathname.startsWith("/threads/")) return await threadsRoutes(url, env, kvGet, kvSet);
       if (url.pathname.startsWith("/hub/api/")) return await hubRoutes(request, env, url);
       if (url.pathname.startsWith("/api/internal/")) return await internal(request, env, url);
       if (url.pathname.startsWith("/tc/")) return await serveLookup(url, env);

@@ -1,13 +1,14 @@
 // Tự đánh giá hằng tuần → tự điều chỉnh chiến lược (giờ đăng, cơ cấu nội dung, mẫu, ngưỡng chọn tin) cho tuần sau.
 // Dữ liệu: tương tác từng bài trên Facebook + tỉ lệ anh duyệt/huỷ bản nháp theo từng nguồn (agent, kế hoạch, video, anh gửi).
 import { claude, modelFor } from "./claude.js";
+import { trendNotes } from "./trends.js";
 
 const VN = 7 * 3600e3;
 export const DEFAULT_STRATEGY = {
   pillar_mix: { hot: 2, qa: 2, cal: 1, err: 1, tool: 1 },
   best_slots: ["07:30", "11:45", "20:00"],
   agent_min_score: 6, agent_max_per_scan: 2, video_per_day: 1,
-  weekly_targets: { fb_posts: 7, videos: 4 },
+  weekly_targets: { fb_posts: 7, videos: 5 },
   content_notes: "", preferred_styles: [],
 };
 
@@ -30,6 +31,9 @@ export async function getStrategy(env, kvGet) {
 // env đã áp chiến lược (không sửa env gốc): giờ vàng, ngưỡng điểm, số tin mỗi lần quét, ghi chú cho người viết
 export async function withStrategy(env, kvGet) {
   const s = await getStrategy(env, kvGet);
+  let trends = "";
+  try { trends = await trendNotes(env, kvGet); } catch (_) {}
+  if (trends) env = { ...env, TREND_NOTES: trends };
   if (s.off || s === DEFAULT_STRATEGY) return env;
   const slots = (s.best_slots || []).filter((x) => /^\d{2}:\d{2}$/.test(x));
   return {
@@ -68,7 +72,7 @@ const TOOL = {
 };
 
 // rows: bài FB tuần qua [{title, re, co, sh, score, hourVN, post_id}] ; followers/delta
-export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta }) {
+export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta, channels = {} }) {
   const since = new Date(Date.now() - 7 * 86400e3).toISOString();
   const jobs = (await env.DB.prepare("SELECT id, status, style FROM jobs WHERE created_at >= ?").bind(since).all()).results || [];
   const bySource = {};
@@ -89,6 +93,7 @@ export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta }
   const data = {
     muc_tieu_6_thang: "Ai cũng biết fanpage THT Audit – tăng người theo dõi và tương tác tự nhiên, không quảng cáo",
     nguoi_theo_doi: followers, tang_so_voi_tuan_truoc: delta,
+    kenh_khac: channels,
     chi_tieu_tuan_qua: prev.weekly_targets,
     bai_fb_tuan_qua: enriched.map((r) => ({ tieu_de: r.title, diem: r.score, cam_xuc: r.re, binh_luan: r.co, chia_se: r.sh, gio: r.hourVN, nguon: r.source, tru_cot: r.pillar, mau: r.style })),
     ban_nhap_theo_nguon: bySource,

@@ -6,11 +6,12 @@
 export const KNOWN_AGENTS = {
   bantin: {
     name: "Bot Bản tin Thuế – Luật", icon: "📰", color: "#E8590C",
-    description: "Dò văn bản & video chính sách, chọn 1 bài/ngày, soạn poster song ngữ, đăng Facebook/TikTok/YouTube",
+    description: "Dò văn bản & video chính sách, nghiên cứu xu hướng, chọn 1 bài/ngày, soạn poster song ngữ, đăng Facebook/Instagram/Threads/TikTok/YouTube",
     steps: [
       { id: "scout", label: "Dò tin & video" }, { id: "pick", label: "Chọn bài" }, { id: "draft", label: "Soạn nháp" },
       { id: "editor", label: "Tổng biên tập" }, { id: "render", label: "Dựng poster" }, { id: "review", label: "Chờ duyệt" },
       { id: "publish", label: "Đăng bài" }, { id: "video", label: "Dựng video" }, { id: "weekly", label: "Tự đánh giá tuần" },
+      { id: "trend", label: "Nghiên cứu xu hướng" },
     ],
   },
 };
@@ -53,7 +54,7 @@ export async function hubEvent(env, e) {
     const def = KNOWN_AGENTS[agent] || e.agentDef;
     const stmts = [
       env.DB.prepare(`INSERT INTO hub_agents (id, name, icon, color, description, steps, last_seen) VALUES (?1,?2,?3,?4,?5,?6,?7)
-        ON CONFLICT(id) DO UPDATE SET last_seen=?7`).bind(agent, def?.name || agent, def?.icon || "🤖", def?.color || "#4C6EF5", def?.description || "", JSON.stringify(def?.steps || []), ts),
+        ON CONFLICT(id) DO UPDATE SET last_seen=?7, steps=CASE WHEN ?6 <> '[]' THEN ?6 ELSE steps END, description=CASE WHEN ?5 <> '' THEN ?5 ELSE description END`).bind(agent, def?.name || agent, def?.icon || "🤖", def?.color || "#4C6EF5", def?.description || "", JSON.stringify(def?.steps || []), ts),
       env.DB.prepare(`INSERT INTO hub_events (agent_id, run_id, step, status, title, detail, cost, ts) VALUES (?,?,?,?,?,?,?,?)`)
         .bind(agent, e.run, e.step || "", e.status || "info", clip(e.title, 300), clip(e.detail, 12000), e.cost || 0, ts),
     ];

@@ -5,7 +5,7 @@ compatibility_date = "2026-09-01"
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/tc/*", "/tg/*", "/tiktok/*", "/hub/api/*"]
+run_worker_first = ["/api/*", "/tc/*", "/tg/*", "/tiktok/*", "/hub/api/*", "/m/*", "/threads/*"]
 
 [[r2_buckets]]
 binding = "FILES"
@@ -57,13 +57,16 @@ AGENT_MIN_SCORE = "6"                       # chỉ soạn tin có độ "nóng"
 AGENT_LOOKBACK_DAYS = "7"
 AGENT_SEARCH_MAX = "6"                      # số lượt tìm web mỗi lần quét (~0,01 USD/lượt)
 AGENT_SLOTS = "07:30,11:45,20:00"           # giờ vàng đăng bài (giờ VN)
-AGENT_TARGETS = "fb,story"   # đăng theo lịch: FB bài viết + Story
+AGENT_TARGETS = "all"        # đăng theo lịch: all = mọi kênh trong POST_TARGETS (+ VIDEO_TARGETS nếu bài có video)
+POST_TARGETS = "fb,story,ig,threads"            # kênh bài ảnh/chữ khi bấm "Đăng 5 kênh"
+VIDEO_TARGETS = "tiktok,youtube,reels,igreels"  # kênh video (dựng trên GitHub): reels = FB Reels, igreels = Instagram Reels
+TREND_SEARCH_MAX = "5"                          # số lượt tìm web khi nghiên cứu xu hướng tuần
 VIDEO_ENABLED = "1"          # tìm video chính sách lúc 14:00 mỗi ngày
 VIDEO_MAX_PER_SCAN = "1"     # tối đa 1 video/ngày
 VIDEO_MIN_SCORE = "6"
 GH_REPO = "anhvncpa/tht-bantin"             # repo chứa luồng dựng video
 GH_REF = "main"
-TIKTOK_MODE = "inbox"                       # inbox: gửi nháp vào app TikTok · direct: đăng thẳng (cần audit)
+TIKTOK_MODE = "direct"                      # direct: đăng thẳng kèm nội dung (tự lùi về hộp thư nếu chưa được cấp quyền) · inbox: gửi nháp
 TIKTOK_PRIVACY = "SELF_ONLY"                # PUBLIC_TO_EVERYONE sau khi app TikTok qua audit
 YOUTUBE_PRIVACY = "private"                 # public sau khi dự án Google qua kiểm duyệt
 
@@ -71,3 +74,4 @@ YOUTUBE_PRIVACY = "private"                 # public sau khi dự án Google qua
 #   ANTHROPIC_API_KEY, APP_PASSWORD, FB_PAGE_ID, FB_PAGE_TOKEN,
 #   TELEGRAM_BOT_TOKEN, TG_WEBHOOK_SECRET, CF_ACCOUNT_ID, CF_API_TOKEN,
 #   GH_TOKEN, INTERNAL_KEY, TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET
+#   THREADS_APP_ID, THREADS_APP_SECRET (Threads), IG_USER_ID (tuỳ chọn – bot tự dò từ fanpage)

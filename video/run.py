@@ -1,7 +1,7 @@
-"""Dựng video dọc có nhạc từ các trang poster rồi đăng Facebook Story, TikTok, YouTube Shorts.
+"""Dựng video dọc có nhạc từ các trang poster rồi đăng Facebook Story/Reels, Instagram Reels, TikTok, YouTube Shorts.
 
 Chạy trong GitHub Actions (xem .github/workflows/video.yml):
-    python video/run.py <job_id> story,tiktok,youtube
+    python video/run.py <job_id> story,tiktok,youtube,reels,igreels
 """
 import json
 import os
@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import requests
@@ -117,8 +118,70 @@ def post_fb_story(path):
     return "đã đăng story"
 
 
+# ---------------- Facebook Reels ----------------
+def post_fb_reel(path, description):
+    ver = os.environ.get("FB_GRAPH_VERSION", "v26.0")
+    page, token = os.environ["FB_PAGE_ID"], os.environ["FB_PAGE_TOKEN"]
+    base = f"https://graph.facebook.com/{ver}/{page}/video_reels"
+    r = requests.post(base, data={"upload_phase": "start", "access_token": token}, timeout=60).json()
+    if "video_id" not in r:
+        raise RuntimeError(f"FB Reels start: {r}")
+    data = Path(path).read_bytes()
+    up = requests.post(r["upload_url"], headers={"Authorization": f"OAuth {token}", "offset": "0", "file_size": str(len(data))},
+                       data=data, timeout=300).json()
+    if not up.get("success"):
+        raise RuntimeError(f"FB Reels upload: {up}")
+    fin = requests.post(base, data={"upload_phase": "finish", "video_id": r["video_id"], "video_state": "PUBLISHED",
+                                    "description": description[:2200], "access_token": token}, timeout=60).json()
+    if not fin.get("success"):
+        raise RuntimeError(f"FB Reels finish: {fin}")
+    return f"https://www.facebook.com/reel/{r['video_id']}"
+
+
+# ---------------- Instagram Reels ----------------
+def post_ig_reel(video_url, caption, ig_user_id):
+    ver = os.environ.get("FB_GRAPH_VERSION", "v26.0")
+    token = os.environ["FB_PAGE_TOKEN"]
+    g = f"https://graph.facebook.com/{ver}"
+    ig = ig_user_id
+    if not ig:
+        p = requests.get(f"{g}/{os.environ['FB_PAGE_ID']}", params={"fields": "instagram_business_account", "access_token": token}, timeout=60).json()
+        ig = (p.get("instagram_business_account") or {}).get("id")
+        if not ig:
+            raise RuntimeError("Fanpage chưa nối tài khoản Instagram chuyên nghiệp")
+    c = requests.post(f"{g}/{ig}/media", data={"media_type": "REELS", "video_url": video_url, "caption": caption[:2200],
+                                              "share_to_feed": "true", "access_token": token}, timeout=60).json()
+    if "id" not in c:
+        raise RuntimeError(f"IG Reels: {c.get('error', c)}")
+    for _ in range(60):  # tối đa ~5 phút
+        st = requests.get(f"{g}/{c['id']}", params={"fields": "status_code,status", "access_token": token}, timeout=60).json()
+        if st.get("status_code") == "FINISHED":
+            break
+        if st.get("status_code") in ("ERROR", "EXPIRED"):
+            raise RuntimeError(f"IG Reels xử lý lỗi: {st.get('status')}")
+        time.sleep(5)
+    else:
+        raise RuntimeError("IG Reels xử lý quá lâu")
+    pub = requests.post(f"{g}/{ig}/media_publish", data={"creation_id": c["id"], "access_token": token}, timeout=60).json()
+    if "id" not in pub:
+        raise RuntimeError(f"IG Reels publish: {pub.get('error', pub)}")
+    link = requests.get(f"{g}/{pub['id']}", params={"fields": "permalink", "access_token": token}, timeout=60).json().get("permalink")
+    return link or f"đã đăng ({pub['id']})"
+
+
 # ---------------- TikTok ----------------
 def post_tiktok(path, caption, mode, privacy):
+    # Đăng trực tiếp (có sẵn nội dung). Nếu TikTok chưa cấp quyền đăng trực tiếp → tự lùi về gửi hộp thư nháp.
+    if mode == "direct":
+        try:
+            return _post_tiktok(path, caption, "direct", privacy)
+        except Exception as e:
+            note = _post_tiktok(path, caption, "inbox", privacy)
+            return f"{note} (chưa đăng trực tiếp được: {str(e)[:120]})"
+    return _post_tiktok(path, caption, mode, privacy)
+
+
+def _post_tiktok(path, caption, mode, privacy):
     token = requests.post(f"{WORKER}/api/internal/tiktok-token", headers=H, timeout=60).json()["access_token"]
     th = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"}
     size = os.path.getsize(path)
@@ -140,7 +203,11 @@ def post_tiktok(path, caption, mode, privacy):
                       headers={"Content-Type": "video/mp4", "Content-Range": f"bytes 0-{size - 1}/{size}"})
     if up.status_code not in (200, 201):
         raise RuntimeError(f"TikTok upload {up.status_code}: {up.text[:200]}")
-    return "đã gửi vào hộp thư TikTok – mở app, kiểm tra nhạc/caption rồi bấm Đăng" if mode != "direct" else "đã đăng"
+    if mode != "direct":
+        return "đã gửi vào hộp thư TikTok – mở app, kiểm tra nhạc/caption rồi bấm Đăng"
+    if body["post_info"]["privacy_level"] == "SELF_ONLY":
+        return "đã đăng kèm sẵn nội dung, đang để chế độ Chỉ mình tôi – mở app TikTok, vào video → ••• → Quyền riêng tư → chọn Mọi người"
+    return "đã đăng kèm sẵn nội dung"
 
 
 # ---------------- YouTube Shorts ----------------
@@ -200,8 +267,12 @@ def main():
         if "tiktok" in targets:
             try: results.append(f"🎵 TikTok: {post_tiktok(out, man['tiktok_caption'] or tags, man['tiktok_mode'], man['tiktok_privacy'])}")
             except Exception as e: results.append(f"🎵 TikTok lỗi: {e}")
-            if man.get("tiktok_mode") != "direct":
-                results.append("\n📋 Caption TikTok (bấm giữ để copy, dán khi đăng):\n\n" + (man.get("tiktok_caption") or tags))
+        if "reels" in targets:
+            try: results.append(f"🎞 FB Reels: {post_fb_reel(out, man.get('reels_caption') or man.get('facebook_caption', ''))}")
+            except Exception as e: results.append(f"🎞 FB Reels lỗi: {e}")
+        if "igreels" in targets:
+            try: results.append(f"🎞 IG Reels: {post_ig_reel(man['video_url'], man.get('ig_caption') or tags, man.get('ig_user_id', ''))}")
+            except Exception as e: results.append(f"🎞 IG Reels lỗi: {e}")
         if "youtube" in targets:
             try: results.append(f"▶️ YouTube: {post_youtube(out, man['youtube_title'], man['youtube_description'], man.get('youtube_tags', []), man['youtube_privacy'])}")
             except Exception as e: results.append(f"▶️ YouTube lỗi: {e}")

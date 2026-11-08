@@ -102,6 +102,7 @@ export async function generateContent(env, { parts, note = "", verify = true, qu
   let extra = PAGES_RULE[pages] || "";
   if (note) extra += `\nGhi chú/yêu cầu của người gửi: ${note}\n`;
   if (env.STRATEGY_NOTES) extra += `\nĐịnh hướng nội dung tuần này (từ tự đánh giá): ${env.STRATEGY_NOTES}\n`;
+  if (env.TREND_NOTES) extra += `\nXu hướng tuần này (Agent tự nghiên cứu) – dùng để chọn câu mở story_hook, tiêu đề, từ khoá; không đưa thông tin chưa kiểm chứng vào bài:\n${env.TREND_NOTES}\n`;
   if (recentStyles.length) extra += `\nMẫu poster vừa dùng gần đây (mới nhất trước): ${recentStyles.join(", ")}.\n`;
   if (checks) extra += `\n<ghi_chu_kiem_chung>\n${checks}\n</ghi_chu_kiem_chung>\n`;
   const msg = await claude(env, {

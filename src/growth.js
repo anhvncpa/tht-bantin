@@ -4,6 +4,7 @@
 import { claude, modelFor } from "./claude.js";
 import { AGENT_DOMAINS } from "./agent.js";
 import { weeklyReview } from "./strategy.js";
+import { channelStats } from "./social.js";
 
 export const PILLARS = {
   hot: "🔥 Tin nóng",
@@ -41,7 +42,7 @@ export async function planWeek(env, kvGet) {
   const mix = JSON.parse(env.STRATEGY_MIX || '{"hot":2,"qa":2,"cal":1,"err":1,"tool":1}');
   const system = `Bạn là trưởng nhóm nội dung fanpage "THT Audit" (Công ty TNHH Kiểm toán và Tư vấn THT – TP.HCM & Đà Nẵng).
 Mục tiêu 6 tháng: chủ doanh nghiệp nhỏ, hộ kinh doanh, kế toán ở Việt Nam đều biết và theo dõi THT Audit nhờ nội dung hữu ích – không quảng cáo.
-Lập kế hoạch 7 bài cho 7 ngày tới, bắt đầu từ ngày mai (hôm nay ${today()}), phân bổ (theo tự đánh giá tuần trước): ${mix.hot} Tin nóng, ${mix.qa} Giải đáp 60 giây, ${mix.cal} Lịch thuế/checklist, ${mix.err} Sai lầm thường gặp, ${mix.tool} Công cụ miễn phí (tra cứu/tính thuế trên audit.com.vn hoặc form.thtaudit.com.vn).${env.STRATEGY_NOTES ? "\nChỉ dẫn tuần này: " + env.STRATEGY_NOTES : ""}
+Lập kế hoạch 7 bài cho 7 ngày tới, bắt đầu từ ngày mai (hôm nay ${today()}), phân bổ (theo tự đánh giá tuần trước): ${mix.hot} Tin nóng, ${mix.qa} Giải đáp 60 giây, ${mix.cal} Lịch thuế/checklist, ${mix.err} Sai lầm thường gặp, ${mix.tool} Công cụ miễn phí (tra cứu/tính thuế trên audit.com.vn hoặc form.thtaudit.com.vn).${env.STRATEGY_NOTES ? "\nChỉ dẫn tuần này: " + env.STRATEGY_NOTES : ""}${env.TREND_NOTES ? "\nXu hướng tuần này (Agent tự nghiên cứu, ưu tiên khai thác):\n" + env.TREND_NOTES : ""}
 - Tin nóng / Lịch thuế: dùng công cụ tìm kiếm trên trang chính thức để lấy văn bản và hạn nộp thật trong tuần/tháng này.
 - Giải đáp / Sai lầm: chọn câu hỏi thật mà kế toán SME hay gặp (hóa đơn, TNCN, TNDN, BHXH, hộ kinh doanh, quyết toán); chỉ dùng quy định đang có hiệu lực, ghi số hiệu văn bản.
 - Không trùng các tiêu đề đã đăng gần đây. Rải đều Thứ Hai → Chủ nhật.
@@ -110,17 +111,30 @@ export async function weeklyInsights(env, kvGet, kvSet) {
   const recent = JSON.parse((await kvGet(env, "growth:recent")) || "[]");
   await kvSet(env, "growth:recent", JSON.stringify([...recent, ...rows.map((r) => r.title)].slice(-60)));
 
+  // Các kênh khác (Instagram, Threads) – so với tuần trước
+  let channels = {};
+  try { channels = await channelStats(env, kvGet, kvSet); } catch (_) {}
+  const prevCh = JSON.parse((await kvGet(env, "growth:channels")) || "{}");
+  await kvSet(env, "growth:channels", JSON.stringify(channels));
+  const chLines = Object.entries({ instagram: "📸 Instagram", threads: "🧵 Threads" }).map(([k, label]) => {
+    const c = channels[k] || {};
+    if (c.error || c.followers == null) return `${label}: ${c.error ? "chưa đọc được (" + c.error + ")" : "chưa có số liệu"}`;
+    const d = prevCh[k]?.followers != null ? c.followers - prevCh[k].followers : null;
+    return `${label}: ${Number(c.followers).toLocaleString("vi-VN")} người theo dõi${d === null ? "" : ` (${d >= 0 ? "+" : ""}${d})`}${c.views_7d != null ? ` · ${c.views_7d} lượt xem/7 ngày` : ""}`;
+  });
+
   // Tự đánh giá + tự điều chỉnh chiến lược tuần tới (Sonnet)
   let review = "";
-  try { review = await weeklyReview(env, kvGet, kvSet, { rows, followers, delta }); }
+  try { review = await weeklyReview(env, kvGet, kvSet, { rows, followers, delta, channels }); }
   catch (e) { review = `\n⚠️ Chưa tự đánh giá được: ${e.message}`; }
 
   const sum = rows.reduce((a, r) => ({ re: a.re + r.re, co: a.co + r.co, sh: a.sh + r.sh }), { re: 0, co: 0, sh: 0 });
   const top = rows.slice(0, 3).map((r, i) => `${i + 1}. ${r.title}\n   👍 ${r.re} · 💬 ${r.co} · ↗️ ${r.sh} · đăng ${r.hourVN}h`).join("\n");
   return [
     `📊 Báo cáo tuần – ${page.name || "THT Audit"} (${today()})`,
-    `👥 Người theo dõi: ${followers.toLocaleString("vi-VN")}${delta === null ? "" : ` (${delta >= 0 ? "+" : ""}${delta} so với tuần trước)`}`,
+    `📘 Facebook: ${followers.toLocaleString("vi-VN")}${delta === null ? "" : ` (${delta >= 0 ? "+" : ""}${delta} so với tuần trước)`}`,
     `📝 ${rows.length} bài · 👍 ${sum.re} · 💬 ${sum.co} · ↗️ ${sum.sh}`,
+    chLines.join("\n"),
     postErr ? "\n⚠️ Chưa đọc được số liệu từng bài: token thiếu quyền pages_read_user_content." : rows.length ? `\n🏆 Bài tốt nhất:\n${top}` : "\nTuần này chưa có bài đăng.",
     review,
   ].join("\n");
