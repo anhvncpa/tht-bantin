@@ -5,6 +5,7 @@ import { claude, modelFor } from "./claude.js";
 import { AGENT_DOMAINS } from "./agent.js";
 import { weeklyReview } from "./strategy.js";
 import { channelStats } from "./social.js";
+import { pageToken } from "./facebook.js";
 
 export const PILLARS = {
   hot: "🔥 Tin nóng",
@@ -80,7 +81,7 @@ export function ideaSource(it) {
 // ---------- (c) Báo cáo tuần từ Facebook Graph API ----------
 const graph = (env) => `https://graph.facebook.com/${env.FB_GRAPH_VERSION || "v26.0"}`;
 async function fbGet(env, path, params) {
-  const q = new URLSearchParams({ ...params, access_token: env.FB_PAGE_TOKEN });
+  const q = new URLSearchParams({ ...params, access_token: await pageToken(env) });
   const r = await fetch(`${graph(env)}/${path}?${q}`);
   const j = await r.json();
   if (!r.ok || j.error) throw new Error(`Facebook: ${j.error?.message || r.status}`);

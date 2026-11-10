@@ -99,6 +99,20 @@ def make_video(frames, hook, out, seconds_per_page=None, music_dir=None):
     return music.name if music else None, total
 
 
+# ---------------- Page token ----------------
+def page_token():
+    """FB_PAGE_TOKEN lỡ là token người dùng → tự đổi sang token của trang."""
+    ver = os.environ.get("FB_GRAPH_VERSION", "v26.0")
+    tok = os.environ["FB_PAGE_TOKEN"]
+    try:
+        r = requests.get(f"https://graph.facebook.com/{ver}/{os.environ['FB_PAGE_ID']}",
+                         params={"fields": "access_token", "access_token": tok}, timeout=30).json()
+        if r.get("access_token"):
+            os.environ["FB_PAGE_TOKEN"] = r["access_token"]
+    except Exception:
+        pass
+
+
 # ---------------- Facebook Story ----------------
 def post_fb_story(path):
     ver = os.environ.get("FB_GRAPH_VERSION", "v26.0")
@@ -238,6 +252,8 @@ def post_youtube(path, title, description, tags, privacy):
 
 def main():
     job_id, targets = sys.argv[1], [t for t in sys.argv[2].split(",") if t]
+    if os.environ.get("FB_PAGE_TOKEN") and os.environ.get("FB_PAGE_ID"):
+        page_token()
     man = requests.get(f"{WORKER}/api/internal/job/{job_id}", headers=H, timeout=60).json()
     work = Path(tempfile.mkdtemp())
     frames = []

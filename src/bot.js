@@ -20,6 +20,13 @@ import { researchTrends, trendMessage } from "./trends.js";
 const POST_TARGETS = (env) => list(env.POST_TARGETS || "fb,story,ig,threads");
 const VIDEO_TARGETS = (env) => list(env.VIDEO_TARGETS || "tiktok,youtube,reels,igreels");
 const VIDEO_KINDS = ["story", "tiktok", "youtube", "reels", "igreels"];
+// Dòng kết quả lỗi → nút "Thử lại" đúng kênh lỗi + nút mở lại bảng chọn kênh
+const FAIL_MAP = [["📘 Facebook", "fb"], ["📱 FB Story", "story"], ["📸 Instagram", "ig"], ["🧵 Threads", "threads"], ["🎵 TikTok", "tiktok"], ["▶️ YouTube", "youtube"], ["🎞 FB Reels", "reels"], ["🎞 IG Reels", "igreels"]];
+function retryKb(id, lines) {
+  const failed = FAIL_MAP.filter(([p]) => lines.some((l) => l.startsWith(p) && /lỗi/i.test(l))).map(([, t]) => t);
+  const row = failed.length ? [[`🔁 Thử lại ${failed.map((t) => TARGET_NAMES[t]).join(", ")}`.slice(0, 60), `pub:${id}:${failed.join(",")}`]] : [];
+  return keyboard([[...row, ["📤 Đăng lại kênh khác", `rk:${id}`]]]);
+}
 function expandTargets(env, arg) {
   const out = [];
   for (const t of String(arg || "").split(",")) {
@@ -128,7 +135,7 @@ export async function handleUpdate(update, env) {
       "• Gửi nhiều ảnh cùng lúc (album) = 1 bài. Gửi thêm ảnh sau đó vẫn cộng vào bài đang làm; muốn sang bài khác gõ /moi.\n" +
       "• Poster mặc định song ngữ Việt – Anh, bài Facebook có phần English below. Bấm 🌐 VI⇄EN để đổi sang chỉ tiếng Việt.\n" +
       (group ? "• Trong nhóm bot: gửi file/ảnh là bot nhận luôn. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
-      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /lich lịch đăng · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
+      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /lich lịch đăng · /danglai đăng lại bài gần nhất · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
   }
   if (cmd === "/quet") {
     await send(env, chat, "🤖 Đang quét các trang Cục Thuế, Bộ Tài chính, VACPA, Chính phủ… (2–4 phút)");
@@ -140,6 +147,12 @@ export async function handleUpdate(update, env) {
     if (!r) return send(env, chat, "Không có bài nào đang bị lỗi để soạn lại.");
     await send(env, chat, "🔁 Đang soạn lại bài bị lỗi gần nhất…");
     return env.JOBS.send({ type: "generate", jobId: r.id });
+  }
+  if (cmd === "/danglai") {
+    const r = await env.DB.prepare("SELECT id FROM jobs WHERE chat_id = ? AND content IS NOT NULL AND render IS NOT NULL AND status IN ('published','review','scheduled') ORDER BY updated_at DESC LIMIT 1").bind(chat).first();
+    if (!r) return send(env, chat, "Chưa có bài nào để đăng lại.");
+    const j = await getJob(env, r.id);
+    return send(env, chat, `📤 Đăng lại bài: ${j.content.title_line1 || j.id}\nChọn kênh:`, reviewKb(j.id, true));
   }
   if (cmd === "/video") {
     await send(env, chat, "🎬 Đang tìm video chính sách mới từ Báo Chính phủ, Cục Thuế, Bộ Tài chính, VTV… (2–4 phút)");
@@ -280,6 +293,7 @@ async function onButton(q, env) {
     return tg(env, "editMessageText", { chat_id: chat, message_id: q.message.message_id, text: "Đã huỷ hẹn giờ cho bài này." });
   }
   if (act === "x") { await hubEvent(env, { run: id, step: "review", status: "done", title: "Anh đã huỷ bài này" }); await clearKb(); job.status = "cancelled"; await saveJob(env, job); return send(env, chat, "Đã huỷ bài này."); }
+  if (act === "rk") return send(env, chat, "📤 Chọn kênh muốn đăng lại:", reviewKb(id, true));
   if (act === "pub") { await hubEvent(env, { run: id, step: "review", status: "done", title: `Anh duyệt: đăng ngay → ${targetsLabel(arg)}` }); await clearKb(); return env.JOBS.send({ type: "publish", jobId: id, targets: expandTargets(env, arg) }); }
 }
 
@@ -441,7 +455,7 @@ async function publish(env, job, targets) {
   if (postLines.length) await hubEvent(env, { run: job.id, step: "publish", status: postLines.some((x) => /lỗi/i.test(x)) ? "error" : "done", title: postLines.join(" · ").slice(0, 280), detail: postLines.join("\n") });
   const vLine = out.find((x) => x.startsWith("🎬"));
   if (vLine) await hubEvent(env, { run: job.id, step: "video", status: /Không khởi động/.test(vLine) ? "error" : "start", title: vLine });
-  await send(env, job.chat_id, out.join("\n"));
+  await send(env, job.chat_id, out.join("\n"), retryKb(job.id, out));
 }
 
 async function dispatchVideo(env, jobId, targets) {
@@ -492,7 +506,7 @@ export async function internal(request, env, url) {
     const job = await getJob(env, id);
     if (job) {
       await hubEvent(env, { run: job.id, step: "video", status: results.some((r) => /lỗi/i.test(r)) ? "error" : "done", title: (results.join(" · ") || "Luồng video đã chạy xong").slice(0, 280), detail: results.join("\n") });
-      await send(env, job.chat_id, results.join("\n") || "Luồng video đã chạy xong.");
+      await send(env, job.chat_id, results.join("\n") || "Luồng video đã chạy xong.", retryKb(job.id, results));
       // TikTok (hộp thư) không nhận nội dung qua API → gửi riêng caption dạng chạm-để-copy để dán khi bấm Đăng trong app
       const cap = job.content?.tiktok_caption;
       if (cap && results.some((r) => r.startsWith("🎵 TikTok:") && r.includes("hộp thư"))) {
@@ -549,6 +563,7 @@ export async function setupWebhook(url, env) {
   await tg(env, "setMyCommands", { commands: [
     { command: "moi", description: "Bắt đầu bài mới" },
     { command: "bantin", description: "Bài mới (dùng trong nhóm)" },
+    { command: "danglai", description: "Đăng lại bài gần nhất lên kênh bị lỗi" },
     { command: "xuhuong", description: "Nghiên cứu xu hướng tuần" },
     { command: "kehoach", description: "Kế hoạch nội dung tuần" },
     { command: "baocao", description: "Báo cáo các kênh" },
