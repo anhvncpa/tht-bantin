@@ -1,5 +1,5 @@
 // Tư vấn theo yêu cầu: anh nêu vấn đề (/tuvan …) → Agent tra cứu nguồn chính thức → anh chọn:
-//   ✉️ Thư tư vấn CHUNG gửi mọi khách hàng ("Kính gửi: Quý Khách hàng"), 1 trang A4 PDF letterhead THT
+//   ✉️ Thư tư vấn CHUNG gửi mọi khách hàng ("Kính gửi: Quý Khách hàng"), PDF tối đa 2 trang A4 (ưu tiên 1 trang), letterhead THT
 //      → bản nháp → anh duyệt → cấp số, lưu kho Thư tư vấn, tự đồng bộ sang My THT (gửi email theo danh sách KH ở đó)
 //   🖼 Poster – đi tiếp luồng bản tin như cũ (duyệt rồi đăng các kênh)
 import { claude, modelFor } from "./claude.js";
@@ -13,21 +13,21 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 // ---------------- 1. Tra cứu + soạn nội dung ----------------
 const ADVICE_TOOL = {
   name: "advice",
-  description: "Nội dung thư tư vấn 1 trang A4 gửi khách hàng",
+  description: "Nội dung thư tư vấn gửi khách hàng (ưu tiên 1 trang, tối đa 2 trang A4)",
   input_schema: {
     type: "object",
     properties: {
       subject: { type: "string", description: "V/v ngắn gọn, ≤ 14 từ, vd 'Thuế GTGT đối với hoạt động cho thuê nhà của cá nhân'" },
       question: { type: "string", description: "Nêu vấn đề nhiều doanh nghiệp đang quan tâm, 1–2 câu, văn phong trang trọng (thư gửi chung mọi khách hàng)" },
       conclusion: { type: "string", description: "Kết luận trả lời thẳng câu hỏi, ≤ 60 từ, có con số/thời hạn nếu có" },
-      analysis: { type: "array", maxItems: 3, description: "Phân tích, mỗi ý ≤ 70 từ, dẫn đúng điều/khoản",
+      analysis: { type: "array", maxItems: 5, description: "Phân tích, mỗi ý ngắn gọn (thường ≤ 80 từ), dẫn đúng điều/khoản",
         items: { type: "object", properties: { heading: { type: "string", description: "≤ 8 từ" }, text: { type: "string" } }, required: ["heading", "text"] } },
-      legal_basis: { type: "array", minItems: 1, maxItems: 5, description: "Căn cứ pháp lý đang có hiệu lực",
+      legal_basis: { type: "array", minItems: 1, maxItems: 8, description: "Căn cứ pháp lý đang có hiệu lực",
         items: { type: "object", properties: {
           doc: { type: "string", description: "Tên đầy đủ: loại văn bản + số hiệu + ngày ban hành + cơ quan, vd 'Nghị định 70/2025/NĐ-CP ngày 20/3/2025 của Chính phủ'" },
           article: { type: "string", description: "Điều/khoản/điểm áp dụng, vd 'Điều 4, khoản 2'" },
           url: { type: "string", description: "Link nguồn đã đọc, rỗng nếu không có" } }, required: ["doc", "article"] } },
-      recommendations: { type: "array", maxItems: 3, items: { type: "string" }, description: "Việc Quý khách nên làm, mỗi ý ≤ 30 từ" },
+      recommendations: { type: "array", maxItems: 5, items: { type: "string" }, description: "Việc Quý khách nên làm, mỗi ý ≤ 30 từ" },
       caveat: { type: "string", description: "Giới hạn/điều kiện của ý kiến tư vấn, ≤ 40 từ" },
       uncertain: { type: "array", items: { type: "string" }, maxItems: 4, description: "Điểm em CHƯA chắc hoặc cần anh kiểm tra lại (chỉ báo nội bộ, không in vào thư)" },
     },
@@ -38,12 +38,12 @@ const ADVICE_TOOL = {
 export async function researchAdvice(env, question) {
   const today = vnNow().toISOString().slice(0, 10).split("-").reverse().join("/");
   const system = `Bạn là chuyên gia tư vấn thuế – kế toán – kiểm toán của Công ty TNHH Kiểm toán và Tư vấn THT. Hôm nay ${today}.
-Nhiệm vụ: viết một THƯ TƯ VẤN CHUNG gửi qua email tới tất cả khách hàng của THT (kính gửi "Quý Khách hàng", không nêu tên doanh nghiệp cụ thể), vừa đúng 1 trang A4, về vấn đề dưới đây.
+Nhiệm vụ: viết một THƯ TƯ VẤN CHUNG gửi qua email tới tất cả khách hàng của THT (kính gửi "Quý Khách hàng", không nêu tên doanh nghiệp cụ thể), ngắn gọn – ưu tiên 1 trang, tối đa 2 trang A4 – về vấn đề dưới đây.
 - Dùng web_search (tối đa ${env.ADVICE_SEARCH_MAX || 8} lượt) để tìm văn bản pháp luật ĐANG CÓ HIỆU LỰC trên trang chính thức. Có thể đọc thuvienphapluat.vn / luatvietnam.vn để tra văn bản hợp nhất, nhưng phải ghi số hiệu văn bản gốc.
 - Kiểm tra văn bản đã bị thay thế/sửa đổi chưa (đặc biệt quy định thay đổi từ 2025–2026). Ưu tiên văn bản mới nhất.
 - Mỗi kết luận phải có căn cứ: số hiệu, ngày, điều/khoản. Không bịa số hiệu, không bịa con số. Điểm nào không chắc thì đưa vào 'uncertain', không đưa vào thư.
 - Văn phong: trang trọng, xưng "THT" – gọi "Quý Khách hàng", câu ngắn, dễ hiểu với chủ doanh nghiệp; nội dung áp dụng chung, nếu khác nhau theo loại hình (DN, hộ kinh doanh, cá nhân) thì nêu rõ từng trường hợp.
-- Tổng độ dài thư ≤ 380 từ để vừa 1 trang.
+- Ưu tiên ngắn gọn: thường 350–450 từ (1 trang); chỉ khi vấn đề phức tạp mới viết dài hơn, tối đa khoảng 800 từ (2 trang).
 Gọi công cụ advice đúng một lần.`;
   const tools = [
     { type: "web_search_20250305", name: "web_search", max_uses: Number(env.ADVICE_SEARCH_MAX || 8), allowed_domains: [...AGENT_DOMAINS, "thuvienphapluat.vn", "luatvietnam.vn"] },
@@ -68,7 +68,7 @@ Gọi công cụ advice đúng một lần.`;
 export async function reviseAdvice(env, adv, instruction) {
   const { id, chat, ask, created_at, number, approved, poster_job, dropped, ...content } = adv;
   const msg = await claude(env, { model: modelFor(env, "fast"), max_tokens: 12000,
-    system: "Bạn biên tập thư tư vấn chung của Công ty TNHH Kiểm toán và Tư vấn THT gửi Quý Khách hàng. Sửa nội dung theo yêu cầu, giữ đúng căn cứ pháp lý (không bịa số hiệu), giữ độ dài vừa 1 trang A4 (≤ 380 từ). Gọi công cụ advice với toàn bộ nội dung sau khi sửa.",
+    system: "Bạn biên tập thư tư vấn chung của Công ty TNHH Kiểm toán và Tư vấn THT gửi Quý Khách hàng. Sửa nội dung theo yêu cầu, giữ đúng căn cứ pháp lý (không bịa số hiệu), giữ ngắn gọn (ưu tiên 1 trang, tối đa 2 trang A4 – khoảng 800 từ). Gọi công cụ advice với toàn bộ nội dung sau khi sửa.",
     tools: [ADVICE_TOOL], tool_choice: { type: "tool", name: "advice" },
     messages: [{ role: "user", content: `Nội dung hiện tại:\n${JSON.stringify(content)}\n\nYêu cầu sửa: ${instruction}` }] });
   const r = msg.content.find((b) => b.type === "tool_use")?.input;
@@ -100,6 +100,10 @@ export function adviceSummary(a) {
 // ---------------- 2. Thư tư vấn PDF (letterhead THT 2026) ----------------
 const LOGO = `<svg viewBox="0 0 561 498" class="sym" aria-label="THT"><path fill="#F7A933" fill-rule="evenodd" d="M0 0H561V498H0Z M73 54V444H488V54Z"/><rect fill="#F7A933" x="72" y="222" width="417" height="54"/><rect fill="#009A57" x="244" y="53" width="73" height="170"/><rect fill="#E0242B" x="244" y="275" width="73" height="170"/><polygon fill="#009A57" points="0,0 561,0 488,54 73,54"/><polygon fill="#E0242B" points="0,498 561,498 488,444 73,444"/></svg>`;
 
+const FONT = "Arial, 'Liberation Sans', Helvetica, sans-serif";
+
+// Thư: chữ Arial 11pt, canh đều, không thu nhỏ chữ; dài thì sang trang 2 (tối đa 2 trang).
+// Letterhead ở đầu trang 1; chân trang (2 văn phòng + số trang) lặp ở mọi trang qua footerTemplate của PDF.
 export function letterHtml(env, a, meta) {
   const d = vnNow();
   const place = env.LETTER_PLACE || "Đà Nẵng";
@@ -109,46 +113,35 @@ export function letterHtml(env, a, meta) {
   const basis = (a.legal_basis || []).map((b) => `<li>${esc(b.doc)}${b.article ? ` – ${esc(b.article)}` : ""}.</li>`).join("");
   const recs = (a.recommendations || []).map((x) => `<li>${esc(x)}</li>`).join("");
   return `<!doctype html><html lang="vi"><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
 <style>
-@page{size:A4;margin:0}
+@page{size:A4;margin:14mm 20mm 30mm 20mm}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:#fff}
-body{font-family:Inter,Arial,sans-serif;color:#23272D;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.page{width:210mm;height:297mm;padding:14mm 20mm 12mm;display:flex;flex-direction:column;overflow:hidden}
+body{font-family:${FONT};font-size:11pt;line-height:1.5;color:#23272D;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .hd{display:flex;justify-content:space-between;align-items:flex-start}
 .brand{display:flex;align-items:center;gap:4mm}
 .sym{height:17mm;width:auto;display:block}
 .wm{display:flex;flex-direction:column}
-.wm .t{font-size:30pt;font-weight:500;letter-spacing:.16em;line-height:1;margin-right:-.16em}
+.wm .t{font-size:30pt;font-weight:400;letter-spacing:.16em;line-height:1;margin-right:-.16em}
 .wm .rule{height:.6pt;background:#23272D;margin:1.6mm 0 1.2mm}
-.wm .s{font-size:6.6pt;letter-spacing:.14em;font-weight:500}
+.wm .s{font-size:6.6pt;letter-spacing:.14em}
 .co{text-align:right;font-size:8.6pt;line-height:1.55}
-.co b{font-size:9.2pt;letter-spacing:.01em}
+.co b{font-size:9.2pt}
 .co i{color:#5B626B}.co span{color:#5B626B}
 .hr{height:.8pt;background:#23272D;margin:7mm 0 5mm}
-.meta{display:flex;justify-content:space-between;color:#5B626B;font-size:var(--fs)}
-.vv{color:#5B626B;font-size:calc(var(--fs) - .5pt);margin-top:1mm}
-.to{margin:5mm 0 3mm;font-size:var(--fs)}
-.body{flex:1;overflow:hidden;font-size:var(--fs);line-height:var(--lh)}
-.body p{margin:0 0 2.2mm}
-.body h3{font-size:var(--fs);font-weight:700;margin:3mm 0 1.2mm;letter-spacing:.01em}
-.body ul{margin:0 0 2mm;padding-left:5mm}.body li{margin:0 0 .8mm}
-.concl{border-top:1.6pt solid #F7A933;padding-top:1.6mm;margin:1mm 0 2.4mm}
-.cav{color:#5B626B;font-style:italic;font-size:calc(var(--fs) - 1pt)}
-.sign{display:flex;justify-content:space-between;align-items:flex-start;margin-top:2mm}
-.sign .r{text-align:center;min-width:70mm;font-size:var(--fs)}
-.sign .r .n{margin-top:16mm;font-weight:700}
-.ft{margin-top:4mm}
-.ft .bar{display:flex;align-items:center;gap:3mm}
-.ft .tri{display:flex;width:12mm;height:1.2mm}.ft .tri i{flex:1}
-.ft .ln{flex:1;height:.4pt;background:#E3E1DC}
-.ft .cols{display:flex;gap:10mm;margin-top:3mm;font-size:7.6pt;line-height:1.55;color:#5B626B}
-.ft .c{flex:1}.ft .c b{color:#23272D;letter-spacing:.06em;font-size:7.8pt}
-.ft .c b:before{content:"";display:inline-block;width:1mm;height:2.6mm;margin-right:1.6mm;vertical-align:-.3mm;background:var(--k)}
-.ft .c em{font-weight:400}
+.meta{display:flex;justify-content:space-between;color:#5B626B}
+.vv{color:#5B626B;margin-top:1mm}
+.to{margin:5mm 0 3mm}
+.body{text-align:justify;hyphens:none}
+.body p{margin:0 0 2.6mm}
+.body h3{font-size:11pt;font-weight:700;margin:3.6mm 0 1.4mm;page-break-after:avoid;break-after:avoid}
+.body ul{margin:0 0 2.4mm;padding-left:6mm}.body li{margin:0 0 1mm}
+.concl{border-top:1.6pt solid #F7A933;padding-top:1.8mm;margin:1mm 0 3mm}
+.cav{color:#5B626B;font-style:italic;font-size:10pt}
+.sign{display:flex;justify-content:flex-end;margin-top:3mm;break-inside:avoid;page-break-inside:avoid}
+.sign .r{text-align:center;min-width:75mm}
+.sign .r .n{margin-top:20mm;font-weight:700}
 </style></head><body>
-<div class="page" id="pg" style="--fs:10.5pt;--lh:1.5">
   <div class="hd">
     <div class="brand">${LOGO}<div class="wm"><div class="t">THT</div><div class="rule"></div><div class="s">AUDITING &amp; CONSULTING</div></div></div>
     <div class="co"><b>CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT</b><br><i>THT Auditing &amp; Consulting Co., Ltd</i><br><span>thtaudit.com.vn</span></div>
@@ -157,7 +150,7 @@ body{font-family:Inter,Arial,sans-serif;color:#23272D;-webkit-print-color-adjust
   <div class="meta"><div>Số: ${esc(meta.number)}</div><div>${esc(place)}, ngày ${d.getUTCDate()} tháng ${d.getUTCMonth() + 1} năm ${d.getUTCFullYear()}</div></div>
   <div class="vv">V/v: ${esc(a.subject)}</div>
   <div class="to"><b>Kính gửi:</b> Quý Khách hàng</div>
-  <div class="body" id="bd">
+  <div class="body">
     <p>Công ty TNHH Kiểm toán và Tư vấn THT trân trọng cảm ơn Quý Khách hàng đã tin tưởng đồng hành. ${esc(a.question)} THT xin gửi Quý Khách hàng một số lưu ý như sau:</p>
     <div class="concl"><b>Kết luận:</b> ${esc(a.conclusion)}</div>
     ${analysis}
@@ -165,24 +158,24 @@ body{font-family:Inter,Arial,sans-serif;color:#23272D;-webkit-print-color-adjust
     ${recs ? `<h3>Khuyến nghị</h3><ul>${recs}</ul>` : ""}
     ${a.caveat ? `<p class="cav">${esc(a.caveat)} Ý kiến căn cứ quy định có hiệu lực tại ngày lập thư.</p>` : ""}
     <p>Nếu cần trao đổi thêm cho trường hợp cụ thể của doanh nghiệp mình, Quý Khách hàng vui lòng liên hệ THT. Trân trọng.</p>
-    <div class="sign"><div></div><div class="r"><b>CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT</b><br>${esc(title)}<div class="n">${esc(name)}</div></div></div>
+    <div class="sign"><div class="r"><b>CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT</b><br>${esc(title)}<div class="n">${esc(name)}</div></div></div>
   </div>
-  <div class="ft">
-    <div class="bar"><div class="tri"><i style="background:#F7A933"></i><i style="background:#009A57"></i><i style="background:#E0242B"></i></div><div class="ln"></div></div>
-    <div class="cols">
-      <div class="c" style="--k:#009A57"><b>TRỤ SỞ CHÍNH</b> <em>/ Head Office</em><br>25 Hoàng Hoa Thám, Phường Gia Định, TP. Hồ Chí Minh<br>T: +84 28 3517 8796 · E: tht@thtaudit.com.vn</div>
-      <div class="c" style="--k:#E0242B"><b>CHI NHÁNH ĐÀ NẴNG</b> <em>/ Da Nang Branch</em><br>312 Lê Đại Hành, Phường Cẩm Lệ, TP. Đà Nẵng<br>T: +84 901 144 078 · E: danang@thtaudit.com.vn</div>
-    </div>
-  </div>
-</div>
-<script>(async function(){try{await document.fonts.ready}catch(e){}
-var pg=document.getElementById('pg'),bd=document.getElementById('bd');
-var steps=[[10.5,1.5],[10,1.45],[9.6,1.4],[9.2,1.35],[8.8,1.3],[8.4,1.28]],i=0;
-while(bd.scrollHeight>bd.clientHeight+1&&i<steps.length-1){i++;pg.style.setProperty('--fs',steps[i][0]+'pt');pg.style.setProperty('--lh',steps[i][1]);}
-document.body.setAttribute('data-fit',String(i)+(bd.scrollHeight>bd.clientHeight+1?'-overflow':''));
-document.body.setAttribute('data-ready','1');})();</script>
+<script>(async function(){try{await document.fonts.ready}catch(e){}document.body.setAttribute('data-ready','1');})();</script>
 </body></html>`;
 }
+
+// Chân trang lặp ở mọi trang (Chromium footerTemplate: chỉ dùng style nội dòng)
+export const LETTER_FOOTER = `<div style="width:100%;padding:0 20mm;font-family:${FONT};font-size:7.4pt;line-height:1.5;color:#5B626B;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+<div style="display:flex;align-items:center;gap:3mm"><div style="display:flex;width:12mm;height:1.2mm"><div style="flex:1;background:#F7A933"></div><div style="flex:1;background:#009A57"></div><div style="flex:1;background:#E0242B"></div></div><div style="flex:1;height:.4pt;background:#E3E1DC"></div><div style="color:#5B626B">Trang <span class="pageNumber"></span>/<span class="totalPages"></span></div></div>
+<div style="display:flex;gap:10mm;margin-top:2.4mm">
+<div style="flex:1"><span style="display:inline-block;width:1mm;height:2.6mm;background:#009A57;margin-right:1.6mm;vertical-align:-0.3mm"></span><b style="color:#23272D;letter-spacing:.06em">TRỤ SỞ CHÍNH</b> <i>/ Head Office</i><br>25 Hoàng Hoa Thám, Phường Gia Định, TP. Hồ Chí Minh<br>T: +84 28 3517 8796 · E: tht@thtaudit.com.vn</div>
+<div style="flex:1"><span style="display:inline-block;width:1mm;height:2.6mm;background:#E0242B;margin-right:1.6mm;vertical-align:-0.3mm"></span><b style="color:#23272D;letter-spacing:.06em">CHI NHÁNH ĐÀ NẴNG</b> <i>/ Da Nang Branch</i><br>312 Lê Đại Hành, Phường Cẩm Lệ, TP. Đà Nẵng<br>T: +84 901 144 078 · E: danang@thtaudit.com.vn</div>
+</div></div>`;
+export const LETTER_PDF_OPTIONS = {
+  format: "a4", printBackground: true, preferCSSPageSize: true,
+  displayHeaderFooter: true, headerTemplate: "<div></div>", footerTemplate: LETTER_FOOTER,
+  margin: { top: "14mm", right: "20mm", bottom: "30mm", left: "20mm" },
+};
 
 export async function htmlToPdf(env, html) {
   if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) throw new Error("Chưa cấu hình CF_ACCOUNT_ID / CF_API_TOKEN cho Browser Rendering");
@@ -193,7 +186,7 @@ export async function htmlToPdf(env, html) {
       html,
       gotoOptions: { waitUntil: "networkidle0", timeout: 30000 },
       waitForSelector: { selector: "body[data-ready]", timeout: 15000 },
-      pdfOptions: { format: "a4", printBackground: true, preferCSSPageSize: true, margin: { top: "0", right: "0", bottom: "0", left: "0" } },
+      pdfOptions: LETTER_PDF_OPTIONS,
     }),
   });
   const type = res.headers.get("content-type") || "";
@@ -238,7 +231,10 @@ const b64 = (bytes) => { let bin = ""; for (let i = 0; i < bytes.length; i += 0x
 
 // Đẩy 1 thư đã duyệt sang My THT: POST {MYTHT_URL}/api/tvl_letter_put, header x-tht-key = MYTHT_KEY
 async function pushToMyTHT(env, letter, pdf) {
-  const res = await fetch(`${env.MYTHT_URL.replace(/\/$/, "")}/api/tvl_letter_put`, {
+  // Worker gọi Worker cùng tài khoản qua *.workers.dev bị Cloudflare chặn (lỗi 530/1042) → dùng Service Binding "MYTHT" nếu có
+  const url = `${(env.MYTHT_URL || "https://mytht.internal").replace(/\/$/, "")}/api/tvl_letter_put`;
+  const call = env.MYTHT && typeof env.MYTHT.fetch === "function" ? (u, o) => env.MYTHT.fetch(new Request(u, o)) : fetch;
+  const res = await call(url, {
     method: "POST", headers: { "content-type": "application/json", "x-tht-key": env.MYTHT_KEY },
     body: JSON.stringify({
       id: letter.id, number: letter.number, subject: letter.subject, question: letter.question || "",
@@ -248,8 +244,14 @@ async function pushToMyTHT(env, letter, pdf) {
       file: { name: letterFileName(letter), type: "application/pdf", base64: b64(pdf) },
     }),
   });
-  let j = {}; try { j = await res.json(); } catch (_) {}
-  if (!res.ok || j.ok === false) throw new Error(j.error || `HTTP ${res.status}`);
+  const raw = await res.text();
+  let j = {}; try { j = JSON.parse(raw); } catch (_) {}
+  if (!res.ok || j.ok === false) {
+    const code = (raw.match(/error code:?\s*(\d{4})/i) || [])[1];
+    const hint = code === "1042" || res.status === 530 ? " – Cloudflare chặn worker gọi worker qua workers.dev, cần Service Binding MYTHT"
+      : res.status === 404 ? " – My THT chưa có route /api/tvl_letter_put" : res.status === 401 || res.status === 403 ? " – sai khoá MYTHT_KEY / TVL_KEY" : "";
+    throw new Error(`${j.error || `HTTP ${res.status}`}${code ? ` (mã ${code})` : ""}${hint}`);
+  }
 }
 
 // Tiêu đề + lời gửi email mẫu (My THT dùng khi gửi theo danh sách khách hàng)
@@ -263,7 +265,7 @@ export function emailTemplate(l) {
 
 // Đồng bộ ngay sau khi duyệt; lỗi thì cron 15 phút tự gửi lại (retryLetterSync)
 export async function syncLetter(env, letter, pdf) {
-  if (!env.MYTHT_URL || !env.MYTHT_KEY) return "đã lưu kho Thư tư vấn – My THT sẽ tự lấy về khi bật đồng bộ (chưa đặt MYTHT_URL)";
+  if ((!env.MYTHT_URL && !env.MYTHT) || !env.MYTHT_KEY) return "đã lưu kho Thư tư vấn – My THT sẽ tự lấy về khi bật đồng bộ (chưa đặt MYTHT_URL/MYTHT_KEY)";
   try {
     await pushToMyTHT(env, letter, pdf);
     await env.DB.prepare("UPDATE letters SET synced = 1, mytht = ? WHERE id = ?").bind(`đã lưu vào My THT ${new Date().toISOString()}`, letter.id).run();
@@ -275,7 +277,7 @@ export async function syncLetter(env, letter, pdf) {
 }
 
 export async function retryLetterSync(env) {
-  if (!env.MYTHT_URL || !env.MYTHT_KEY) return;
+  if ((!env.MYTHT_URL && !env.MYTHT) || !env.MYTHT_KEY) return;
   await ensure(env);
   const rows = (await env.DB.prepare("SELECT * FROM letters WHERE approved_at IS NOT NULL AND (synced IS NULL OR synced = 0) ORDER BY approved_at LIMIT 5").all()).results || [];
   for (const r of rows) {

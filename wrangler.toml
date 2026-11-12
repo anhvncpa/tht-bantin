@@ -25,6 +25,12 @@ queue = "tht-jobs"
 max_batch_size = 1
 max_retries = 0
 
+# Nối My THT bằng Service Binding (cần khi My THT cũng chạy trên tài khoản Cloudflare này –
+# worker gọi worker qua *.workers.dev bị chặn, báo lỗi HTTP 530). Bỏ dấu # ở 3 dòng dưới và điền đúng tên worker My THT:
+# [[services]]
+# binding = "MYTHT"
+# service = "TEN-WORKER-MY-THT"
+
 [triggers]
 # Giờ UTC: 23:00 = 06:00 sáng VN, 07:00 = 14:00 VN → Agent quét tin; */15 = kiểm tra bài hẹn giờ vàng
 crons = ["0 23 * * *", "0 7 * * *", "*/15 * * * *", "0 13 * * SUN"]
@@ -67,7 +73,7 @@ LETTER_SIGNER_TITLE = "GIÁM ĐỐC"
 LETTER_SIGNER_NAME = ""                          # họ tên người ký in dưới chữ ký (để trống = ký tay)
 ADVICE_QUALITY = "strong"                       # strong = Opus (chính xác nhất) · fast = Sonnet
 ADVICE_SEARCH_MAX = "8"
-MYTHT_URL = "https://my.thtaudit.com.vn"                                   # vd https://my.thtaudit.com.vn – để trống = chỉ lưu ở /thu/
+MYTHT_URL = ""                                   # vd https://my.thtaudit.com.vn – để trống = chỉ lưu ở /thu/
 VIDEO_ENABLED = "1"          # tìm video chính sách lúc 14:00 mỗi ngày
 VIDEO_MAX_PER_SCAN = "1"     # tối đa 1 video/ngày
 VIDEO_MIN_SCORE = "6"
