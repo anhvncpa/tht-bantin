@@ -6,6 +6,9 @@ import { claude, modelFor } from "./claude.js";
 export const AGENT_DOMAINS = [
   "gdt.gov.vn", "mof.gov.vn", "vacpa.org.vn", "chinhphu.vn", "vanban.chinhphu.vn", "congbao.chinhphu.vn",
   "vbpl.vn", "moha.gov.vn", "molisa.gov.vn", "baohiemxahoi.gov.vn",
+  // bổ sung 11/2026
+  "baochinhphu.vn", "quochoi.vn", "sbv.gov.vn", "customs.gov.vn", "dangkykinhdoanh.gov.vn",
+  "tapchitaichinh.vn", "thoibaotaichinhvietnam.vn", "thuehaiquan.vn",
 ];
 
 // Giờ vàng đăng bài (giờ Việt Nam): sáng đi làm, trưa nghỉ, tối rảnh

@@ -5,6 +5,7 @@ import { claude, modelFor } from "./claude.js";
 export const VIDEO_DOMAINS = [
   "baochinhphu.vn", "chinhphu.vn", "mof.gov.vn", "gdt.gov.vn", "vtv.vn", "vtv.gov.vn", "vov.vn",
   "youtube.com", "facebook.com", "vacpa.org.vn", "thoibaotaichinhvietnam.vn",
+  "quochoi.vn", "tapchitaichinh.vn", "vnanet.vn",
 ];
 
 const VN = 7 * 3600e3;
