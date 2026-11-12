@@ -15,6 +15,8 @@ import { claude, modelFor, hubTag } from "./claude.js";
 import { hubEvent } from "./hub.js";
 import { postInstagram, igCaption, postThreads, mediaUrl, igUserId } from "./social.js";
 import { researchTrends, trendMessage } from "./trends.js";
+import { researchAdvice, reviseAdvice, adviceSource, adviceSummary, letterHtml, htmlToPdf, saveLetter, nextLetterNumber, syncLetter, retryLetterSync, letterFileName } from "./advice.js";
+import { sendDocument } from "./telegram.js";
 
 // Kênh đăng: "all" = bài ảnh/chữ, "allv" = kèm các kênh video (dựng trên GitHub Actions)
 const POST_TARGETS = (env) => list(env.POST_TARGETS || "fb,story,ig,threads");
@@ -109,6 +111,14 @@ const commandOf = (text) => {
 };
 const editKey = (chat, uid) => `edit:${chat}:${uid}`;
 const armKey = (chat, uid) => `arm:${chat}:${uid}`;
+const askKey = (chat, uid) => `ask:${chat}:${uid}`;     // đang chờ anh nhắn vấn đề cần tư vấn
+const reviseKey = (chat, uid) => `advfix:${chat}:${uid}`; // đang chờ anh nhắn yêu cầu sửa thư
+// Bước 1 – chọn đầu ra; bước 2 – duyệt bản nháp thư
+const advKb = (id) => keyboard([[["✉️ Thư tư vấn PDF", `av:${id}:letter`], ["🖼 Poster", `av:${id}:poster`], ["📦 Cả hai", `av:${id}:both`]]]);
+const letterKbd = (id) => keyboard([
+  [["✅ Duyệt – lưu vào My THT", `av:${id}:ok`]],
+  [["✏️ Sửa thư", `av:${id}:fix`], ["🖼 Làm thêm poster", `av:${id}:poster`], ["❌ Huỷ", `av:${id}:drop`]],
+]);
 
 // ---------------- webhook: must answer fast ----------------
 export async function handleUpdate(update, env) {
@@ -135,7 +145,7 @@ export async function handleUpdate(update, env) {
       "• Gửi nhiều ảnh cùng lúc (album) = 1 bài. Gửi thêm ảnh sau đó vẫn cộng vào bài đang làm; muốn sang bài khác gõ /moi.\n" +
       "• Poster mặc định song ngữ Việt – Anh, bài Facebook có phần English below. Bấm 🌐 VI⇄EN để đổi sang chỉ tiếng Việt.\n" +
       (group ? "• Trong nhóm bot: gửi file/ảnh là bot nhận luôn. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
-      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /lich lịch đăng · /danglai đăng lại bài gần nhất · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
+      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /tuvan hỏi một vấn đề → Thư tư vấn PDF + Poster · /lich lịch đăng · /danglai đăng lại bài gần nhất · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
   }
   if (cmd === "/quet") {
     await send(env, chat, "🤖 Đang quét các trang Cục Thuế, Bộ Tài chính, VACPA, Chính phủ… (2–4 phút)");
@@ -147,6 +157,12 @@ export async function handleUpdate(update, env) {
     if (!r) return send(env, chat, "Không có bài nào đang bị lỗi để soạn lại.");
     await send(env, chat, "🔁 Đang soạn lại bài bị lỗi gần nhất…");
     return env.JOBS.send({ type: "generate", jobId: r.id });
+  }
+  if (cmd === "/tuvan" || cmd === "/hoi") {
+    const q = m.text.replace(/^\/\S+\s*/, "").trim();
+    if (!q) { await kvSet(env, askKey(chat, uid), "1"); return send(env, chat, "Anh nhắn vấn đề cần tư vấn (vd: “Cá nhân cho thuê nhà 150 triệu/năm phải nộp thuế gì?”)."); }
+    await send(env, chat, `🔎 Em đang tra cứu nguồn chính thức cho vấn đề:\n“${q}”\n(2–4 phút, xong em gửi tóm tắt để anh chọn Thư tư vấn / Poster)`);
+    return env.JOBS.send({ type: "advise", chat, q });
   }
   if (cmd === "/danglai") {
     const r = await env.DB.prepare("SELECT id FROM jobs WHERE chat_id = ? AND content IS NOT NULL AND render IS NOT NULL AND status IN ('published','review','scheduled') ORDER BY updated_at DESC LIMIT 1").bind(chat).first();
@@ -199,6 +215,18 @@ export async function handleUpdate(update, env) {
   }
 
   if (m.text && !cmd) {
+    if (await kvGet(env, askKey(chat, uid))) {
+      await kvDel(env, askKey(chat, uid));
+      const q = m.text.trim();
+      await send(env, chat, `🔎 Em đang tra cứu nguồn chính thức cho vấn đề:\n“${q}”\n(2–4 phút)`);
+      return env.JOBS.send({ type: "advise", chat, q });
+    }
+    const fixing = await kvGet(env, reviseKey(chat, uid));
+    if (fixing) {
+      await kvDel(env, reviseKey(chat, uid));
+      await send(env, chat, "✏️ Đang sửa thư theo yêu cầu…");
+      return env.JOBS.send({ type: "advletter", advId: fixing, instruction: m.text.trim() });
+    }
     const editing = await kvGet(env, editKey(chat, uid));
     if (editing) {
       await kvDel(env, editKey(chat, uid));
@@ -234,6 +262,7 @@ async function onButton(q, env) {
   await tg(env, "answerCallbackQuery", { callback_query_id: q.id });
   const [act, id, arg] = q.data.split(":");
   if (act === "ip") return pickIdeas(env, chat, q, arg);
+  if (act === "av") return onAdviceButton(env, chat, uid, q, id, arg);
   if (act === "sg") {
     await kvSet(env, "growth:strategy_off", arg === "off" ? "1" : "0");
     return send(env, chat, arg === "off" ? "↩️ Đã tạm không áp dụng điều chỉnh tự động, bot chạy theo cấu hình gốc. Bật lại: bấm nút ✅ ở báo cáo tuần." : "✅ Đã bật lại điều chỉnh tự động theo tự đánh giá tuần.");
@@ -316,6 +345,9 @@ export async function processTask(task, env) {
   }
   if (task.type === "insights") return runInsights(env, task.chat);
   if (task.type === "trends") return runTrends(env, task.chat, task.thenPlan);
+  if (task.type === "advise") return runAdvise(env, task.chat, task.q);
+  if (task.type === "advletter") return makeAdviceLetter(env, task.advId, task.instruction);
+  if (task.type === "advok") return approveAdviceLetter(env, task.advId);
   const job = await getJob(env, task.jobId);
   if (!job) return;
   env = { ...env, HUB_RUN: job.id };
@@ -563,6 +595,7 @@ export async function setupWebhook(url, env) {
   await tg(env, "setMyCommands", { commands: [
     { command: "moi", description: "Bắt đầu bài mới" },
     { command: "bantin", description: "Bài mới (dùng trong nhóm)" },
+    { command: "tuvan", description: "Hỏi 1 vấn đề → Thư tư vấn PDF + Poster" },
     { command: "danglai", description: "Đăng lại bài gần nhất lên kênh bị lỗi" },
     { command: "xuhuong", description: "Nghiên cứu xu hướng tuần" },
     { command: "kehoach", description: "Kế hoạch nội dung tuần" },
@@ -606,6 +639,7 @@ async function scheduleList(env) {
 }
 
 async function runDue(env) {
+  try { await retryLetterSync(env); } catch (e) { console.log("letter sync", e.message); }
   const rows = (await env.DB.prepare("SELECT k, v FROM kv WHERE k LIKE 'sched:%'").all()).results || [];
   for (const r of rows) {
     const it = JSON.parse(r.v);
@@ -691,6 +725,90 @@ async function runTrends(env, chat, thenPlan = false) {
     if (chat && !silent) await send(env, chat, `📈 Nghiên cứu xu hướng bị lỗi: ${e.message}`);
   }
   if (thenPlan) await env.JOBS.send({ type: "plan" });
+}
+
+// ---------------- Tư vấn theo yêu cầu: Thư tư vấn PDF + Poster ----------------
+async function runAdvise(env, chat, q) {
+  const id = "tv" + crypto.randomUUID().slice(0, 6);
+  env = { ...env, HUB_RUN: `adv-${id}`, HUB_STEP: "scout", HUB_LABEL: "Tra cứu tư vấn" };
+  await hubEvent(env, { run: `adv-${id}`, step: "scout", status: "start", runTitle: `Tư vấn: ${q.slice(0, 80)}`, title: "Tra cứu văn bản trên nguồn chính thức" });
+  let a;
+  try { a = await researchAdvice(env, q); }
+  catch (e) {
+    await hubEvent(env, { run: `adv-${id}`, step: "scout", status: "error", title: `Tra cứu lỗi: ${e.message}` });
+    return send(env, chat, `🔎 Tra cứu bị lỗi: ${e.message}\nAnh gõ lại /tuvan để thử lần nữa.`);
+  }
+  const adv = { ...a, id, chat, ask: q, created_at: new Date().toISOString() };
+  await kvSet(env, `adv:${id}`, JSON.stringify(adv));
+  await hubEvent(env, { run: `adv-${id}`, step: "draft", status: "waiting", title: `Đã có nội dung: ${a.subject} – chờ anh chọn đầu ra`, detail: adviceSummary(a) });
+  await send(env, chat, adviceSummary(a), advKb(id));
+}
+
+async function onAdviceButton(env, chat, uid, q, id, arg) {
+  const adv = JSON.parse((await kvGet(env, `adv:${id}`)) || "null");
+  if (!adv) return send(env, chat, "Nội dung tư vấn này đã hết hạn, gõ /tuvan để làm mới.");
+  const clearKb = () => tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } });
+  if (arg === "ok") {
+    if (adv.approved) return send(env, chat, `Thư này đã duyệt (số ${adv.number}).`);
+    await clearKb(); await send(env, chat, "✅ Đang hoàn thiện thư (cấp số) và lưu vào My THT…");
+    return env.JOBS.send({ type: "advok", advId: id });
+  }
+  if (arg === "fix") { await kvSet(env, reviseKey(chat, uid), id); return send(env, chat, "Anh nhắn yêu cầu sửa thư (vd: “thêm ví dụ tính thuế”, “bỏ ý 3”, “nhấn mạnh hạn nộp 30/1”)."); }
+  if (arg === "drop") { await clearKb(); adv.dropped = true; await kvSet(env, `adv:${id}`, JSON.stringify(adv)); return send(env, chat, "❌ Đã huỷ bản nháp thư này (không lưu vào My THT)."); }
+  if (arg === "letter" || arg === "both") { await send(env, chat, "✉️ Đang làm bản nháp Thư tư vấn (khoảng 30 giây)…"); await env.JOBS.send({ type: "advletter", advId: id }); }
+  if (arg === "poster" || arg === "both") {
+    if (adv.poster_job) return send(env, chat, "🖼 Poster cho nội dung này đang làm/đã làm rồi.");
+    const job = { id: crypto.randomUUID().slice(0, 8), chat_id: chat, status: "working", files: [], style: "auto", pages: "auto", quality: "fast", note: adviceSource(adv), created_at: now() };
+    await saveJob(env, job);
+    await tagJob(env, kvSet, job.id, { source: "advice", pillar: "qa" });
+    adv.poster_job = job.id; await kvSet(env, `adv:${id}`, JSON.stringify(adv));
+    await send(env, chat, "🖼 Đang soạn poster từ nội dung tư vấn (em tự chọn mẫu), xong gửi anh duyệt như bài thường…");
+    await env.JOBS.send({ type: "generate", jobId: job.id });
+  }
+}
+
+// Bản nháp thư (chưa cấp số) → anh duyệt / sửa / huỷ
+async function makeAdviceLetter(env, advId, instruction = "") {
+  let adv = JSON.parse((await kvGet(env, `adv:${advId}`)) || "null");
+  if (!adv) return;
+  const RUN = `adv-${advId}`;
+  try {
+    if (instruction) {
+      const fixed = await reviseAdvice(env, adv, instruction);
+      adv = { ...adv, ...fixed, approved: false };
+      await kvSet(env, `adv:${advId}`, JSON.stringify(adv));
+    }
+    const pdf = await htmlToPdf(env, letterHtml(env, adv, { number: "…/" + new Date(Date.now() + 7 * 3600e3).getUTCFullYear() + "/THT-TV (bản nháp)" }));
+    await sendDocument(env, adv.chat, pdf, `NHAP_Thu-tu-van_${advId}.pdf`, "application/pdf",
+      `📝 BẢN NHÁP Thư tư vấn${instruction ? " (đã sửa)" : ""}\nV/v: ${adv.subject}\nKính gửi: Quý Khách hàng\nDuyệt xong em cấp số thư và lưu vào My THT.`);
+    await send(env, adv.chat, "Anh duyệt bản nháp thư:", letterKbd(advId));
+    await hubEvent(env, { run: RUN, step: "review", status: "waiting", title: `Bản nháp thư: ${adv.subject} – chờ anh duyệt` });
+  } catch (e) {
+    await hubEvent(env, { run: RUN, step: "draft", status: "error", title: `Làm thư lỗi: ${e.message}` });
+    await send(env, adv.chat, `✉️ Làm thư tư vấn bị lỗi: ${e.message}`, keyboard([[["🔁 Thử lại", `av:${advId}:letter`]]]));
+  }
+}
+
+// Anh duyệt → cấp số, dựng bản chính thức, lưu kho + đồng bộ My THT
+async function approveAdviceLetter(env, advId) {
+  const adv = JSON.parse((await kvGet(env, `adv:${advId}`)) || "null");
+  if (!adv || adv.approved) return;
+  const RUN = `adv-${advId}`;
+  try {
+    adv.number = adv.number || (await nextLetterNumber(env, kvGet, kvSet));
+    const pdf = await htmlToPdf(env, letterHtml(env, adv, { number: adv.number }));
+    const letter = { id: advId, number: adv.number, subject: adv.subject, question: adv.ask, created_at: adv.created_at, approved_at: new Date().toISOString(),
+      data: { conclusion: adv.conclusion, legal_basis: adv.legal_basis, recommendations: adv.recommendations } };
+    await saveLetter(env, letter, pdf);
+    const mytht = await syncLetter(env, letter, pdf);
+    adv.approved = true; await kvSet(env, `adv:${advId}`, JSON.stringify(adv));
+    await sendDocument(env, adv.chat, pdf, letterFileName(letter), "application/pdf",
+      `✅ Thư tư vấn số ${letter.number} (đã duyệt)\nV/v: ${letter.subject}\n📁 ${mytht}\nKho thư: ${env.PUBLIC_BASE_URL}/thu/`);
+    await hubEvent(env, { run: RUN, step: "publish", status: /lỗi|chưa/.test(mytht) ? "info" : "done", title: `Duyệt thư ${letter.number}: ${letter.subject}`, detail: mytht });
+  } catch (e) {
+    await hubEvent(env, { run: RUN, step: "publish", status: "error", title: `Duyệt thư lỗi: ${e.message}` });
+    await send(env, adv.chat, `✉️ Hoàn thiện thư bị lỗi: ${e.message}`, keyboard([[["🔁 Thử lại", `av:${advId}:ok`]]]));
+  }
 }
 
 // ---------------- Album nhiều ảnh = 1 bài ----------------

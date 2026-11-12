@@ -61,6 +61,13 @@ AGENT_TARGETS = "all"        # đăng theo lịch: all = mọi kênh trong POST_
 POST_TARGETS = "fb,story,ig,threads"            # kênh bài ảnh/chữ khi bấm "Đăng 5 kênh"
 VIDEO_TARGETS = "tiktok,youtube,reels,igreels"  # kênh video (dựng trên GitHub): reels = FB Reels, igreels = Instagram Reels
 TREND_SEARCH_MAX = "5"                          # số lượt tìm web khi nghiên cứu xu hướng tuần
+# Thư tư vấn (/tuvan)
+LETTER_PLACE = "Đà Nẵng"                        # địa danh ghi trên thư
+LETTER_SIGNER_TITLE = "GIÁM ĐỐC"
+LETTER_SIGNER_NAME = ""                          # họ tên người ký in dưới chữ ký (để trống = ký tay)
+ADVICE_QUALITY = "strong"                       # strong = Opus (chính xác nhất) · fast = Sonnet
+ADVICE_SEARCH_MAX = "8"
+MYTHT_URL = ""                                   # vd https://my.thtaudit.com.vn – để trống = chỉ lưu ở /thu/
 VIDEO_ENABLED = "1"          # tìm video chính sách lúc 14:00 mỗi ngày
 VIDEO_MAX_PER_SCAN = "1"     # tối đa 1 video/ngày
 VIDEO_MIN_SCORE = "6"
@@ -75,3 +82,4 @@ YOUTUBE_PRIVACY = "private"                 # public sau khi dự án Google qua
 #   TELEGRAM_BOT_TOKEN, TG_WEBHOOK_SECRET, CF_ACCOUNT_ID, CF_API_TOKEN,
 #   GH_TOKEN, INTERNAL_KEY, TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET
 #   THREADS_APP_ID, THREADS_APP_SECRET (Threads), IG_USER_ID (tuỳ chọn – bot tự dò từ fanpage)
+#   MYTHT_KEY (khoá chung với My THT để đẩy Thư tư vấn PDF sang)

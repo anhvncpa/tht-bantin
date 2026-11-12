@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kho Thư tư vấn · THT</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{--ink:#23272D;--paper:#F6F5F2;--muted:#5B626B;--line:#E3E1DC;--gold:#F7A933;--green:#009A57;--red:#E0242B;--amber:#8A5200}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Arial,sans-serif;color:var(--ink);background:var(--paper)}
+header{background:var(--ink);color:#fff;display:flex;align-items:center;gap:12px;padding:12px 24px}
+header svg{height:22px;width:auto}
+header b{letter-spacing:.06em}
+header span{color:#C9CDD2;font-size:13px}
+header .sp{flex:1}
+header button{background:none;border:1px solid #3A3F46;color:#C9CDD2;border-radius:6px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer}
+main{max-width:1100px;margin:0 auto;padding:28px 24px}
+.tri{display:flex;width:48px;height:4px;margin-bottom:10px}.tri i{flex:1}
+h1{margin:0;font-size:24px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:4px 0 20px;font-size:14px}
+.bar{display:flex;gap:8px;margin-bottom:16px}
+input{font:inherit;border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:#fff;color:var(--ink)}
+input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.bar input{flex:1}
+.btn{font:inherit;font-weight:600;border-radius:6px;padding:9px 14px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);min-height:40px}
+.btn.pri{background:var(--gold);border-color:var(--gold)}
+table{width:100%;border-collapse:collapse;background:#fff}
+th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);text-align:left;padding:10px 12px;border-bottom:1px solid var(--ink)}
+td{padding:12px;border-bottom:1px solid var(--line);vertical-align:top;font-size:14px}
+td .q{color:var(--muted);font-size:13px;margin-top:4px}
+td.num{white-space:nowrap;font-variant-numeric:tabular-nums}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:13px}.st:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--gold)}
+.st.ok:before{background:var(--green)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts .btn{padding:6px 10px;min-height:34px;font-size:13px}
+.empty{padding:48px;text-align:center;color:var(--muted);background:#fff}
+.login{max-width:360px;margin:12vh auto;background:#fff;padding:32px;border-top:2px solid var(--ink)}
+.login p{color:var(--muted);font-size:14px}.login input{width:100%;margin:8px 0 12px}
+.err{color:var(--red);font-size:13px;min-height:18px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:6px;font-size:14px;display:none}
+@media (max-width:720px){main{padding:20px 16px}th:nth-child(3),td:nth-child(3){display:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  const SYM = '<svg viewBox="0 0 561 498" aria-label="THT"><path fill="#F7A933" fill-rule="evenodd" d="M0 0H561V498H0Z M73 54V444H488V54Z"/><rect fill="#F7A933" x="72" y="222" width="417" height="54"/><rect fill="#009A57" x="244" y="53" width="73" height="170"/><rect fill="#E0242B" x="244" y="275" width="73" height="170"/><polygon fill="#009A57" points="0,0 561,0 488,54 73,54"/><polygon fill="#E0242B" points="0,498 561,498 488,444 73,444"/></svg>';
+  const store = { get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }, set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (_) {} } };
+  let KEY = store.get("thtHubKey") || "", SESSION = "", rows = [];
+  try { SESSION = sessionStorage.getItem("thtHubSession") || ""; } catch (_) {}
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const hdr = () => (SESSION ? { "x-hub-session": SESSION } : { "x-app-key": KEY });
+  const toast = (t) => { const e = $("#toast"); e.textContent = t; e.style.display = "block"; setTimeout(() => (e.style.display = "none"), 2200); };
+  const fname = (r) => "THT_Thu-tu-van_" + r.number.replace(/\//g, "-") + ".pdf";
+
+  async function api(path) {
+    const r = await fetch("/hub/api/letters" + path, { headers: hdr() });
+    if (r.status === 401) { KEY = ""; store.set("thtHubKey", null); login(); throw new Error("auth"); }
+    return r;
+  }
+  function login(msg) {
+    $("#app").innerHTML = `<div class="login"><div class="tri"><i style="background:#F7A933"></i><i style="background:#009A57"></i><i style="background:#E0242B"></i></div>
+      <h1>Kho Thư tư vấn</h1><p>Nhập mật khẩu ứng dụng (như Agent Hub) để xem.</p>
+      <form id="f"><input id="pw" type="password" autocomplete="current-password" placeholder="Mật khẩu"><div class="err">${msg || ""}</div><button class="btn pri" style="width:100%">Đăng nhập</button></form></div>`;
+    $("#f").onsubmit = async (e) => { e.preventDefault(); KEY = $("#pw").value.trim(); try { await load(); store.set("thtHubKey", KEY); } catch (_) { login("Sai mật khẩu, anh thử lại."); } };
+  }
+  function shell() {
+    $("#app").innerHTML = `<header>${SYM}<b>THT</b><span>Kho Thư tư vấn</span><div class="sp"></div><button id="out">Thoát</button></header>
+    <main><div class="tri"><i style="background:#F7A933"></i><i style="background:#009A57"></i><i style="background:#E0242B"></i></div>
+    <h1>Thư tư vấn</h1><div class="sub">Thư tư vấn chung gửi Quý Khách hàng, soạn khi anh gõ /tuvan trên Telegram và đã duyệt. Thư tự đồng bộ sang My THT để gửi email theo danh sách khách hàng.</div>
+    <div class="bar"><input id="q" placeholder="Tìm theo chủ đề, số thư…"><button class="btn" id="rf">Làm mới</button></div><div id="list"></div></main>`;
+    $("#out").onclick = () => { store.set("thtHubKey", null); KEY = ""; login(); };
+    $("#rf").onclick = () => load();
+    let t; $("#q").oninput = () => { clearTimeout(t); t = setTimeout(load, 300); };
+  }
+  async function load() {
+    const q = $("#q") ? $("#q").value.trim() : "";
+    const r = await api(q ? "?q=" + encodeURIComponent(q) : "");
+    rows = (await r.json()).letters || [];
+    if (!$("#list")) shell();
+    draw();
+  }
+  function draw() {
+    if (!rows.length) { $("#list").innerHTML = '<div class="empty">Chưa có thư nào. Trên Telegram gõ /tuvan kèm câu hỏi để Agent soạn thư.</div>'; return; }
+    $("#list").innerHTML = `<table><thead><tr><th>Số</th><th>V/v</th><th>Ngày duyệt</th><th>My THT</th><th></th></tr></thead><tbody>${rows.map((r, i) => `
+      <tr><td class="num">${esc(r.number)}</td><td><b>${esc(r.subject)}</b><div class="q">${esc(r.question || "")}</div></td>
+      <td class="num">${new Date(r.approved_at || r.created_at).toLocaleDateString("vi-VN")}</td>
+      <td><span class="st ${r.synced ? "ok" : ""}">${r.synced ? "Đã đồng bộ" : "Chờ đồng bộ"}</span></td>
+      <td><div class="acts"><button class="btn" data-v="${i}">Xem</button><button class="btn" data-d="${i}">Tải PDF</button><button class="btn" data-m="${i}">Chép nội dung email</button></div></td></tr>`).join("")}</tbody></table>`;
+    document.querySelectorAll("[data-v]").forEach((b) => (b.onclick = () => pdf(rows[b.dataset.v], false)));
+    document.querySelectorAll("[data-d]").forEach((b) => (b.onclick = () => pdf(rows[b.dataset.d], true)));
+    document.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => mail(rows[b.dataset.m])));
+  }
+  async function pdf(r, download) {
+    const win = download ? null : window.open("", "_blank");
+    const blob = await (await api("/" + r.id + ".pdf")).blob();
+    const url = URL.createObjectURL(blob);
+    if (download) { const a = document.createElement("a"); a.href = url; a.download = fname(r); a.click(); }
+    else if (win) win.location = url; else location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  async function mail(r) {
+    const text = `Tiêu đề: ${r.email.subject}\n\n${r.email.body}`;
+    try { await navigator.clipboard.writeText(text); toast("Đã chép nội dung email – dán vào email và đính kèm file PDF"); } catch (_) { prompt("Chép nội dung email:", text); }
+  }
+  (KEY || SESSION) ? load().catch(() => {}) : login();
+})();
+</script>
+</body>
+</html>

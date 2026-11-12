@@ -10,6 +10,7 @@ import { brandOf } from "./render.js";
 import { handleUpdate, processTask, internal, tiktokRoutes, setupWebhook } from "./bot.js";
 import { hubRoutes } from "./hub.js";
 import { serveMedia, threadsRoutes } from "./social.js";
+import { letterRoutes } from "./advice.js";
 import { kvGet, kvSet } from "./bot.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
@@ -30,6 +31,7 @@ export default {
       if (url.pathname.startsWith("/tiktok/")) return await tiktokRoutes(url, env);
       if (url.pathname.startsWith("/m/")) return await serveMedia(url, env);
       if (url.pathname.startsWith("/threads/")) return await threadsRoutes(url, env, kvGet, kvSet);
+      if (url.pathname.startsWith("/hub/api/letters")) return await letterRoutes(request, env, url);
       if (url.pathname.startsWith("/hub/api/")) return await hubRoutes(request, env, url);
       if (url.pathname.startsWith("/api/internal/")) return await internal(request, env, url);
       if (url.pathname.startsWith("/tc/")) return await serveLookup(url, env);

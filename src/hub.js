@@ -96,7 +96,7 @@ async function verifyTicket(secret, t) {
   try { const p = JSON.parse(new TextDecoder().decode(fromB64u(body))); return p.exp > Date.now() / 1000 ? p : null; } catch (_) { return null; }
 }
 const ADMIN_ROLES = /^(admin|owner|director|giamdoc|quantri|quản trị|giám đốc)$/i;
-async function viewer(request, env) {
+export async function viewer(request, env) {
   if (same(request.headers.get("x-app-key"), env.APP_PASSWORD)) return { u: "mat-khau-ung-dung" };
   const p = await verifyTicket(env.HUB_EMBED_SECRET, request.headers.get("x-hub-session"));
   return p && p.kind === "session" ? p : null;
@@ -104,7 +104,7 @@ async function viewer(request, env) {
 
 // ---------------- API cho trang /hub và agent bên ngoài ----------------
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
-const same = (a, b) => { a = String(a || ""); b = String(b || ""); if (!a || a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
+export const same = (a, b) => { a = String(a || ""); b = String(b || ""); if (!a || a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
 
 export async function hubRoutes(request, env, url) {
   await ensure(env);
