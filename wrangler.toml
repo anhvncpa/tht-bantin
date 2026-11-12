@@ -29,7 +29,7 @@ max_retries = 0
 # worker gọi worker qua *.workers.dev bị chặn, báo lỗi HTTP 530). Bỏ dấu # ở 3 dòng dưới và điền đúng tên worker My THT:
 # [[services]]
 # binding = "MYTHT"
-# service = "TEN-WORKER-MY-THT"
+service = "thtdn-crm-dev"
 
 [triggers]
 # Giờ UTC: 23:00 = 06:00 sáng VN, 07:00 = 14:00 VN → Agent quét tin; */15 = kiểm tra bài hẹn giờ vàng
