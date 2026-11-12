@@ -67,7 +67,7 @@ LETTER_SIGNER_TITLE = "GIÁM ĐỐC"
 LETTER_SIGNER_NAME = ""                          # họ tên người ký in dưới chữ ký (để trống = ký tay)
 ADVICE_QUALITY = "strong"                       # strong = Opus (chính xác nhất) · fast = Sonnet
 ADVICE_SEARCH_MAX = "8"
-MYTHT_URL = ""                                   # vd https://my.thtaudit.com.vn – để trống = chỉ lưu ở /thu/
+MYTHT_URL = "https://my.thtaudit.com.vn"                                   # vd https://my.thtaudit.com.vn – để trống = chỉ lưu ở /thu/
 VIDEO_ENABLED = "1"          # tìm video chính sách lúc 14:00 mỗi ngày
 VIDEO_MAX_PER_SCAN = "1"     # tối đa 1 video/ngày
 VIDEO_MIN_SCORE = "6"
