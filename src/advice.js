@@ -109,7 +109,7 @@ export function letterHtml(env, a, meta) {
   const place = env.LETTER_PLACE || "Đà Nẵng";
   const title = env.LETTER_SIGNER_TITLE || "GIÁM ĐỐC";
   const name = env.LETTER_SIGNER_NAME || "";
-  const analysis = (a.analysis || []).map((x, i) => `<p><b>${i + 1}. ${esc(x.heading)}.</b> ${esc(x.text)}</p>`).join("");
+  const analysis = (a.analysis || []).map((x, i) => `<div class="pt"><div class="ph">${i + 1}. ${esc(x.heading)}</div><p>${esc(x.text)}</p></div>`).join("");
   const basis = (a.legal_basis || []).map((b) => `<li>${esc(b.doc)}${b.article ? ` – ${esc(b.article)}` : ""}.</li>`).join("");
   const recs = (a.recommendations || []).map((x) => `<li>${esc(x)}</li>`).join("");
   return `<!doctype html><html lang="vi"><head><meta charset="utf-8">
@@ -130,15 +130,25 @@ body{font-family:${FONT};font-size:11pt;line-height:1.5;color:#23272D;-webkit-pr
 .co i{color:#5B626B}.co span{color:#5B626B}
 .hr{height:.8pt;background:#23272D;margin:7mm 0 5mm}
 .meta{display:flex;justify-content:space-between;color:#5B626B}
-.vv{color:#5B626B;margin-top:1mm}
+.vv{margin:5mm 0 0;font-size:12pt;font-weight:700;line-height:1.4;text-align:center;padding:0 8mm}
 .to{margin:5mm 0 3mm}
 .body{text-align:justify;hyphens:none}
 .body p{margin:0 0 2.6mm}
-.body h3{font-size:11pt;font-weight:700;margin:3.6mm 0 1.4mm;page-break-after:avoid;break-after:avoid}
+.body h3{font-size:10pt;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:5mm 0 2mm;padding-bottom:1mm;border-bottom:.6pt solid #23272D;page-break-after:avoid;break-after:avoid}
+.intro{background:#F6F5F2;padding:3mm 4mm;margin:0 0 0;border-bottom:1.6pt solid #F7A933}
+.intro p{margin:0 0 1.6mm}.intro p:last-child{margin:0}
+.pt{margin:0 0 2.6mm;break-inside:avoid;page-break-inside:avoid}
+.pt .ph{font-weight:700;margin-bottom:.6mm;page-break-after:avoid;break-after:avoid}
+.pt p{margin:0}
+.close{margin-top:3mm}
+.regards{margin-top:1.6mm;font-weight:700}
+.nn{font-size:9pt;line-height:1.45}
+.nn b{font-style:italic}
 .body ul{margin:0 0 2.4mm;padding-left:6mm}.body li{margin:0 0 1mm}
-.concl{border-top:1.6pt solid #F7A933;padding-top:1.8mm;margin:1mm 0 3mm}
+.concl{margin:3mm 0 0;padding:0 0 1mm}
+.concl .ph{font-weight:700;margin-bottom:.6mm}
 .cav{color:#5B626B;font-style:italic;font-size:10pt}
-.sign{display:flex;justify-content:flex-end;margin-top:3mm;break-inside:avoid;page-break-inside:avoid}
+.sign{display:flex;justify-content:space-between;align-items:flex-start;margin-top:4mm;break-inside:avoid;page-break-inside:avoid}
 .sign .r{text-align:center;min-width:75mm}
 .sign .r .n{margin-top:20mm;font-weight:700}
 </style></head><body>
@@ -149,16 +159,25 @@ body{font-family:${FONT};font-size:11pt;line-height:1.5;color:#23272D;-webkit-pr
   <div class="hr"></div>
   <div class="meta"><div>Số: ${esc(meta.number)}</div><div>${esc(place)}, ngày ${d.getUTCDate()} tháng ${d.getUTCMonth() + 1} năm ${d.getUTCFullYear()}</div></div>
   <div class="vv">V/v: ${esc(a.subject)}</div>
-  <div class="to"><b>Kính gửi:</b> Quý Khách hàng</div>
+  <div class="to"><b>Kính gửi:</b> Quý Khách hàng.</div>
   <div class="body">
-    <p>Công ty TNHH Kiểm toán và Tư vấn THT trân trọng cảm ơn Quý Khách hàng đã tin tưởng đồng hành. ${esc(a.question)} THT xin gửi Quý Khách hàng một số lưu ý như sau:</p>
-    <div class="concl"><b>Kết luận:</b> ${esc(a.conclusion)}</div>
+    <div class="intro">
+      <p>Công ty TNHH Kiểm toán và Tư vấn THT trân trọng cảm ơn Quý Khách hàng đã tin tưởng đồng hành.</p>
+      <p>${esc(a.question)}</p>
+      <p>THT xin gửi Quý Khách hàng một số lưu ý như sau:</p>
+    </div>
+    <div class="concl"><div class="ph">Kết luận</div><p>${esc(a.conclusion)}</p></div>
+    <h3>Nội dung tư vấn</h3>
     ${analysis}
     <h3>Căn cứ pháp lý</h3><ul>${basis}</ul>
     ${recs ? `<h3>Khuyến nghị</h3><ul>${recs}</ul>` : ""}
     ${a.caveat ? `<p class="cav">${esc(a.caveat)} Ý kiến căn cứ quy định có hiệu lực tại ngày lập thư.</p>` : ""}
-    <p>Nếu cần trao đổi thêm cho trường hợp cụ thể của doanh nghiệp mình, Quý Khách hàng vui lòng liên hệ THT. Trân trọng.</p>
-    <div class="sign"><div class="r"><b>CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT</b><br>${esc(title)}<div class="n">${esc(name)}</div></div></div>
+    <div class="close"><p>Nếu cần trao đổi thêm cho trường hợp cụ thể của doanh nghiệp mình, Quý Khách hàng vui lòng liên hệ THT.</p>
+    <p class="regards">Trân trọng./.</p></div>
+    <div class="sign">
+      <div class="nn"><b>Nơi nhận:</b><br>– Như trên;<br>– Lưu: VT, THT.</div>
+      <div class="r"><b>CÔNG TY TNHH KIỂM TOÁN VÀ TƯ VẤN THT</b><br>${esc(title)}<div class="n">${esc(name)}</div></div>
+    </div>
   </div>
 <script>(async function(){try{await document.fonts.ready}catch(e){}document.body.setAttribute('data-ready','1');})();</script>
 </body></html>`;
