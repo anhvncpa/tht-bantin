@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<!-- Video chữ chuyển động (motion graphics) cho bản tin THT.
+     Khung hình dựng bằng window.seek(t) (không dùng CSS animation) để mỗi khung hình chính xác tuyệt đối.
+     4 mẫu (theme) xen kẽ nền sáng – tối; thời lượng mỗi cảnh tính theo số chữ để người xem kịp đọc;
+     window.cues() trả mốc thời gian để chèn hiệu ứng âm thanh (whoosh, pop, tick, impact). -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&display=swap">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1080px;height:1920px;overflow:hidden;background:#16191D}
+body{font-family:"Be Vietnam Pro",Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+#stage{position:absolute;inset:0;overflow:hidden}
+canvas{position:absolute;inset:0;z-index:2;pointer-events:none}
+.scene{position:absolute;inset:0}
+.bg{position:absolute;inset:0;z-index:1;opacity:0}
+.ct{position:absolute;inset:0;z-index:3;opacity:0}
+/* chế độ tối / sáng */
+.D .bg{background:radial-gradient(120% 80% at 50% 38%,#262B31 0%,#16191D 62%,#101215 100%)}
+.L .bg{background:radial-gradient(120% 80% at 50% 30%,#FFFFFF 0%,#F6F5F2 70%,#ECEAE4 100%)}
+.D .ct{color:#fff;--muted:#C9CDD2}
+.L .ct{color:#23272D;--muted:#5B626B}
+.wm{position:absolute;right:-300px;bottom:-240px;width:900px}
+.D .wm{opacity:.035}.L .wm{opacity:.05}
+.acc{color:var(--acc)}
+.L.mark .acc{color:#23272D;background:linear-gradient(transparent 60%,rgba(247,169,51,.9) 60%);padding:0 .06em}
+.top{position:absolute;left:80px;top:96px;right:80px;display:flex;align-items:center;justify-content:space-between;z-index:4}
+.brand{display:flex;align-items:center;gap:18px;font-weight:800;letter-spacing:.2em;font-size:30px}
+.brand svg{height:44px;width:auto}
+.tri{display:flex;width:96px;height:8px}.tri i{flex:1}
+.counter{position:absolute;left:80px;top:200px;font-size:30px;font-weight:700;letter-spacing:.24em;z-index:4}
+body.mD .top,body.mD .counter b{color:#fff} body.mD .counter{color:#9AA1A9}
+body.mL .top,body.mL .counter b{color:#23272D} body.mL .counter{color:#5B626B}
+.word{display:inline-block;white-space:pre}
+.dot{position:absolute;border-radius:50%;background:var(--acc)}
+.eyebrow{font-size:34px;font-weight:800;letter-spacing:.22em;color:var(--acc)}
+.L.mark .eyebrow{color:#8A5200}
+.hook{position:absolute;left:80px;right:80px;top:760px;font-size:92px;font-weight:800;line-height:1.14;letter-spacing:-.02em}
+.t1{position:absolute;left:80px;right:80px;top:600px;font-size:96px;font-weight:800;line-height:1.08;letter-spacing:-.025em}
+.t2{position:absolute;left:80px;right:80px;font-size:150px;font-weight:900;line-height:1.02;letter-spacing:-.035em}
+.ref{position:absolute;left:80px;right:80px;font-size:36px;font-weight:600;color:var(--muted)}
+.hl{position:absolute;left:80px;right:80px;top:620px}
+.hl .v{display:inline-block;font-size:250px;font-weight:900;letter-spacing:-.05em;line-height:1;margin-top:30px}
+.hl .u{font-size:72px;font-weight:800;margin-top:14px}
+.hl .n{font-size:44px;font-weight:500;color:var(--muted);margin-top:44px;line-height:1.42}
+.pt{position:absolute;left:80px;right:80px;top:640px}
+.pt .bar{width:120px;height:10px;background:var(--acc);margin-bottom:46px}
+.L.mark .pt .bar{background:#F7A933}
+.pt .h{font-size:84px;font-weight:800;line-height:1.14;letter-spacing:-.02em}
+.pt .x{font-size:48px;font-weight:500;color:var(--muted);line-height:1.45;margin-top:44px}
+.ac{position:absolute;left:80px;right:80px;top:520px}
+.ac .row{display:flex;gap:34px;align-items:flex-start;margin-top:58px}
+.ac .ck{flex:0 0 78px;height:78px;border-radius:50%;background:#009A57;display:flex;align-items:center;justify-content:center}
+.ac .ck svg{width:44px}
+.ac .tt{font-size:56px;font-weight:800;line-height:1.15}
+.ac .tx{font-size:42px;font-weight:500;color:var(--muted);line-height:1.38;margin-top:10px}
+.end .logo{position:absolute;left:0;right:0;top:600px;display:flex;justify-content:center;align-items:center;gap:34px}
+.end .logo svg{height:170px;width:auto}
+.end .wmk .tt{font-size:150px;font-weight:600;letter-spacing:.16em;line-height:1}
+.end .wmk .rl{height:4px;margin:16px 0 12px}
+.D.end .wmk .rl{background:#fff}.L.end .wmk .rl{background:#23272D}
+.end .wmk .ss{font-size:30px;letter-spacing:.16em;font-weight:600}
+.end .line{position:absolute;left:100px;right:100px;top:940px;text-align:center;font-size:54px;font-weight:800;line-height:1.25}
+.end .sub{position:absolute;left:100px;right:100px;top:1100px;text-align:center;font-size:38px;font-weight:500;color:var(--muted)}
+.pill{position:absolute;left:50%;padding:26px 56px;border-radius:999px;font-size:46px;font-weight:800;white-space:nowrap}
+.pill.g{background:#F7A933;color:#23272D;top:1240px}
+.D .pill.d{background:#fff;color:#23272D;top:1380px}
+.L .pill.d{background:#23272D;color:#fff;top:1380px}
+.prog{position:absolute;left:80px;right:80px;bottom:120px;height:6px;z-index:4}
+body.mD .prog{background:rgba(255,255,255,.14)} body.mL .prog{background:rgba(35,39,45,.12)}
+.prog i{position:absolute;left:0;top:0;bottom:0;background:#F7A933}
+</style>
+</head>
+<body class="mD">
+<div id="stage">
+  <canvas id="fx" width="1080" height="1920"></canvas>
+  <div class="top" id="top"><div class="brand"><svg viewBox="0 0 561 498"><path fill="#F7A933" fill-rule="evenodd" d="M0 0H561V498H0Z M73 54V444H488V54Z"/><rect fill="#F7A933" x="72" y="222" width="417" height="54"/><rect fill="#009A57" x="244" y="53" width="73" height="170"/><rect fill="#E0242B" x="244" y="275" width="73" height="170"/><polygon fill="#009A57" points="0,0 561,0 488,54 73,54"/><polygon fill="#E0242B" points="0,498 561,498 488,444 73,444"/></svg><span id="brandtxt">THT AUDIT</span></div><div class="tri"><i style="background:#F7A933"></i><i style="background:#009A57"></i><i style="background:#E0242B"></i></div></div>
+  <div class="counter" id="counter"></div>
+  <div id="scenes"></div>
+  <div class="prog" id="prog"><i id="progi"></i></div>
+</div>
+<script>
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = (x) => 1 - Math.pow(1 - clamp(x), 3);
+const easeIO = (x) => { x = clamp(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const back = (x) => { x = clamp(x); const c = 1.70158; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const nWords = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
+// Thời lượng đủ đọc: ~3 từ/giây cho chữ to, cộng thời gian chữ hiện
+const readTime = (s, base = 1.4, perWord = .27, min = 3, max = 6.5) => clamp(base + nWords(s) * perWord, min, max);
+const accNums = (s) => esc(s).replace(/(\d[\d.,–\-\/%]*\s?(?:triệu|tỷ|đồng|%|ngày|tháng|năm)?)/g, '<span class="acc">$1</span>');
+function words(html) {
+  const out = []; const div = document.createElement("div"); div.innerHTML = html;
+  div.childNodes.forEach((n) => {
+    const a = n.nodeType === 1;
+    n.textContent.split(/(\s+)/).forEach((w) => { if (!w) return; out.push(w.trim() ? `<span class="word${a ? " acc" : ""}">${esc(w)}</span>` : " "); });
+  });
+  return out.join("");
+}
+function fit(el, maxPx, minPx, maxH) { let s = maxPx; el.style.fontSize = s + "px"; while (s > minPx && el.scrollHeight > maxH) { s -= 4; el.style.fontSize = s + "px"; } }
+
+// 4 mẫu: màu điểm nhấn + thứ tự nền tối (D) / sáng (L) theo loại cảnh
+const THEMES = {
+  gold:  { acc: { D: "#F7A933", L: "#23272D" }, mark: true,  seq: { hook: "D", title: "D", hl: "L", pt: ["D", "L"], ac: "D", end: "L" } },
+  paper: { acc: { D: "#F7A933", L: "#23272D" }, mark: true,  seq: { hook: "L", title: "L", hl: "D", pt: ["L", "D"], ac: "L", end: "D" } },
+  green: { acc: { D: "#3DCB8A", L: "#009A57" }, mark: false, seq: { hook: "L", title: "D", hl: "L", pt: ["D", "L"], ac: "L", end: "L" } },
+  red:   { acc: { D: "#FF5A5F", L: "#E0242B" }, mark: false, seq: { hook: "D", title: "L", hl: "D", pt: ["L", "D"], ac: "D", end: "L" } },
+};
+let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const P = Array.from({ length: 70 }, () => ({ x: rnd() * 1080, y: rnd() * 1920, r: 2 + rnd() * 6, s: .2 + rnd() * .8, a: rnd() * Math.PI * 2, g: rnd() < .55 }));
+let D = null, SC = [], TOTAL = 0, TH = THEMES.gold, CUES = [];
+const CTX = document.getElementById("fx").getContext("2d");
+const SYM = (mono) => `<svg viewBox="0 0 561 498"><path fill="${mono || "#F7A933"}" fill-rule="evenodd" d="M0 0H561V498H0Z M73 54V444H488V54Z"/><rect fill="${mono || "#F7A933"}" x="72" y="222" width="417" height="54"/><rect fill="${mono || "#009A57"}" x="244" y="53" width="73" height="170"/><rect fill="${mono || "#E0242B"}" x="244" y="275" width="73" height="170"/>${mono ? "" : '<polygon fill="#009A57" points="0,0 561,0 488,54 73,54"/><polygon fill="#E0242B" points="0,498 561,498 488,444 73,444"/>'}</svg>`;
+
+window.setup = function (data) {
+  D = data; TH = THEMES[data.theme] || THEMES.gold; CUES = [];
+  if (data.brand_label) document.getElementById("brandtxt").textContent = data.brand_label;
+  const root = document.getElementById("scenes"); root.innerHTML = ""; SC = [];
+  let ptIdx = 0;
+  const add = (kind, dur, html) => {
+    let mode = TH.seq[kind]; if (Array.isArray(mode)) mode = mode[ptIdx++ % mode.length];
+    const el = document.createElement("div"); el.className = `scene ${mode} ${TH.mark ? "mark" : ""} s-${kind}${kind === "end" ? " end" : ""}`;
+    el.style.setProperty("--acc", TH.acc[mode]);
+    el.innerHTML = `<div class="bg">${SYM(mode === "D" ? "#fff" : "#23272D").replace("<svg", '<svg class="wm"')}</div><div class="ct">${html}</div>`;
+    root.appendChild(el); SC.push({ el, kind, mode, dur }); return el;
+  };
+  // 1. câu mở
+  const hookTxt = data.hook || data.title1;
+  const h = add("hook", readTime(hookTxt, 1.5, .28, 3.2, 5), `<div class="dot" id="hookdot"></div><div class="hook">${words(accNums(hookTxt))}</div>`);
+  fit(h.querySelector(".hook"), 96, 60, 560);
+  // 2. tiêu đề
+  const tt = `${data.title1 || ""} ${data.title2 || data.topic || ""}`;
+  const t = add("title", readTime(tt, 1.7, .28, 4, 6), `${data.eyebrow ? `<div class="eyebrow" style="position:absolute;left:80px;top:480px">${esc(data.eyebrow)}</div>` : ""}<div class="t1">${words(esc(data.title1 || ""))}</div><div class="t2">${words('<span class="acc">' + esc((data.title2 || data.topic || "").replace(/[.。]$/, "") + ".") + "</span>")}</div><div class="ref"></div>`);
+  const t1 = t.querySelector(".t1"), t2 = t.querySelector(".t2"), ref = t.querySelector(".ref");
+  fit(t1, 100, 64, 360); fit(t2, 160, 80, 560);
+  t2.style.top = (600 + t1.scrollHeight + 34) + "px";
+  ref.textContent = data.doc_ref || ""; ref.style.top = (parseFloat(t2.style.top) + t2.scrollHeight + 50) + "px";
+  // 3. con số nổi bật
+  if (data.hl && data.hl.value) {
+    const e = add("hl", readTime(`${data.hl.label} ${data.hl.unit} ${data.hl.note}`, 1.6, .2, 3.4, 5), `<div class="hl"><div class="eyebrow">${esc(data.hl.label || "")}</div><div class="v acc">${esc(data.hl.value)}</div><div class="u">${esc(data.hl.unit || "")}</div><div class="n">${esc(data.hl.note || "")}</div></div>`);
+    fit(e.querySelector(".v"), 250, 120, 280);
+  }
+  // 4. các ý chính
+  (data.points || []).forEach((p, i, arr) => {
+    const e = add("pt", readTime(`${p.title} ${p.text}`, 1.5, .26, 3.6, 6.5), `<div class="pt"><div class="bar"></div><div class="h">${words(accNums(p.title))}</div><div class="x">${esc(p.text || "")}</div></div>`);
+    e.dataset.counter = `${data.points_label || "NỘI DUNG"}  <b>${String(i + 1).padStart(2, "0")}</b> / ${String(arr.length).padStart(2, "0")}`;
+    fit(e.querySelector(".h"), 88, 56, 440); fit(e.querySelector(".x"), 48, 34, 520);
+  });
+  // 5. việc cần làm
+  if (data.actions?.length) {
+    const ck = '<svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const per = data.actions.map((a) => clamp(.9 + nWords(`${a.title} ${a.text}`) * .2, 1.5, 2.6));
+    const e = add("ac", 1.0 + per.reduce((x, y) => x + y, 0) + 1.2, `<div class="ac"><div class="eyebrow">${esc(data.actions_label || "VIỆC CẦN LÀM NGAY")}</div>${data.actions.map((a) => `<div class="row"><div class="ck">${ck}</div><div><div class="tt">${esc(a.title)}</div><div class="tx">${esc(a.text || "")}</div></div></div>`).join("")}</div>`);
+    e.dataset.per = JSON.stringify(per);
+  }
+  // 6. thẻ kết
+  add("end", 4.6, `<div class="logo">${SYM()}<div class="wmk"><div class="tt">THT</div><div class="rl"></div><div class="ss">AUDITING &amp; CONSULTING</div></div></div>
+    <div class="line">${esc(data.cta || "Theo dõi THT Audit để không bỏ lỡ chính sách mới")}</div><div class="sub">Kiểm toán · Thuế · Tư vấn</div>
+    <div class="pill g">Hotline ${esc(data.phone || "0901 144 078")}</div><div class="pill d">${esc(data.website || "thtaudit.com.vn")}</div>`);
+  let acc = 0;
+  SC.forEach((s, i) => {
+    s.start = acc; acc += s.dur;
+    s.wipe = i > 0 && SC[i - 1].mode !== s.mode;             // đổi nền sáng/tối → hiệu ứng quét
+    if (i > 0) CUES.push({ t: s.start, k: s.wipe ? "whoosh" : "swish" });
+    if (s.kind === "hook") CUES.push({ t: s.start + .02, k: "pop" });
+    if (s.kind === "title") CUES.push({ t: s.start + .75, k: "impact" });
+    if (s.kind === "hl") CUES.push({ t: s.start + .2, k: "impact" });
+    if (s.kind === "pt") CUES.push({ t: s.start + .35, k: "tick" });
+    if (s.kind === "ac") { let x = s.start + 1.0; JSON.parse(s.el.dataset.per).forEach((d) => { CUES.push({ t: x + .2, k: "tick" }); x += d; }); }
+    if (s.kind === "end") { CUES.push({ t: s.start + 1.4, k: "pop" }); CUES.push({ t: s.start + 1.75, k: "pop" }); }
+  });
+  TOTAL = acc;
+  return TOTAL;
+};
+window.cues = () => CUES;
+
+function wordsIn(el, lt, start = 0, step = .08, dur = .5) {
+  el.querySelectorAll(".word").forEach((w, i) => { const p = ease((lt - start - i * step) / dur); w.style.opacity = p; w.style.transform = `translateY(${(1 - p) * 60}px)`; });
+}
+
+window.seek = function (t) {
+  // cảnh hiện tại → màu nền (để vẽ hạt và thanh trên cho hợp)
+  let cur = SC[0]; for (const s of SC) if (t >= s.start) cur = s;
+  document.body.className = "m" + cur.mode;
+  CTX.clearRect(0, 0, 1080, 1920);
+  const gather = 1 - ease(t / 1.6);
+  for (const p of P) {
+    const x = p.x + Math.sin(t * p.s + p.a) * 40, y = (p.y - t * 30 * p.s + 1920) % 1920;
+    const cx = 540 + (x - 540) * (1 - gather * .6), cy = 960 + (y - 960) * (1 - gather * .6);
+    CTX.globalAlpha = (cur.mode === "D" ? .35 : .22) + .35 * Math.abs(Math.sin(t * 1.3 + p.a));
+    CTX.fillStyle = p.g ? "#F7A933" : (cur.mode === "D" ? "#8B939C" : "#B9B4A8");
+    CTX.beginPath(); CTX.arc(cx, cy, p.r, 0, Math.PI * 2); CTX.fill();
+  }
+  CTX.globalAlpha = 1;
+  document.getElementById("progi").style.width = (clamp(t / TOTAL) * 100) + "%";
+  let counter = "";
+  SC.forEach((s, i) => {
+    const lt = t - s.start, el = s.el, d = s.dur, last = i === SC.length - 1;
+    const bg = el.querySelector(".bg"), ct = el.querySelector(".ct");
+    const nextWipe = !last && SC[i + 1].wipe;
+    // nền: cảnh mới quét vào (đổi sáng/tối) hoặc hiện ngay; giữ nền cảnh cũ đến khi cảnh mới phủ kín
+    if (lt < 0 || (!last && lt > d + .5)) { bg.style.opacity = 0; ct.style.opacity = 0; return; }
+    if (s.wipe) { const w = easeIO(lt / .5); bg.style.opacity = 1; bg.style.clipPath = `inset(0 0 0 ${(1 - w) * 100}%)`; }
+    else { bg.style.opacity = lt < d || last ? 1 : 0; bg.style.clipPath = "none"; }
+    if (!last && lt >= d && !nextWipe) bg.style.opacity = 0;
+    bg.style.zIndex = 1;
+    // chữ: cảnh cũ mờ/trượt ra 0,3 s cuối; cảnh mới hiện sau 0,25 s (chờ nền quét)
+    const inP = ease((lt - (s.wipe ? .25 : 0)) / .3), outP = last ? 0 : ease((lt - (d - .3)) / .3);
+    ct.style.opacity = lt >= d && !last ? 0 : Math.min(inP, 1 - outP);
+    ct.style.transform = `translateX(${-outP * 120}px)`;
+    const L = lt - (s.wipe ? .25 : 0);
+    if (s.kind === "hook") {
+      const dot = el.querySelector("#hookdot"), r = 60 * back(L / .6) * (1 - ease((L - .9) / .5) * .7);
+      dot.style.width = dot.style.height = 2 * r + "px"; dot.style.left = 540 - r + "px"; dot.style.top = 600 - r + "px";
+      dot.style.opacity = 1 - ease((L - 1.2) / .6) * .6;
+      wordsIn(el.querySelector(".hook"), L, .55, .1);
+    }
+    if (s.kind === "title") {
+      wordsIn(el.querySelector(".t1"), L, .1, .09);
+      const t2 = el.querySelector(".t2"), p = back((L - .75) / .6);
+      t2.style.opacity = clamp((L - .75) / .3); t2.style.transform = `scale(${.85 + .15 * p})`; t2.style.transformOrigin = "left center";
+      el.querySelector(".ref").style.opacity = clamp((L - 1.5) / .5);
+    }
+    if (s.kind === "hl") {
+      const v = el.querySelector(".v"), raw = D.hl.value, m = String(raw).match(/^(\d+)(.*)$/);
+      const p = ease((L - .2) / 1.2);
+      v.textContent = m && !/[–\-\/]/.test(raw) ? Math.round(Number(m[1]) * p) + m[2] : raw;
+      v.style.transform = `scale(${.8 + .2 * back((L - .1) / .6)})`; v.style.transformOrigin = "left center";
+      el.querySelector(".u").style.opacity = clamp((L - .7) / .4);
+      el.querySelector(".n").style.opacity = clamp((L - 1.1) / .5);
+    }
+    if (s.kind === "pt") {
+      if (lt < d) counter = el.dataset.counter;
+      el.querySelector(".bar").style.width = 120 * ease(L / .5) + "px";
+      wordsIn(el.querySelector(".h"), L, .15, .07);
+      const x = el.querySelector(".x"), st = .4 + nWords(el.querySelector(".h").textContent) * .07;
+      x.style.opacity = clamp((L - st) / .5); x.style.transform = `translateY(${(1 - ease((L - st) / .5)) * 30}px)`;
+    }
+    if (s.kind === "ac") {
+      const per = JSON.parse(el.dataset.per); let x0 = .8;
+      el.querySelectorAll(".row").forEach((r, k) => { const p = ease((L - x0) / .45); r.style.opacity = p; r.style.transform = `translateX(${(1 - p) * 80}px)`;
+        r.querySelector(".ck").style.transform = `scale(${back((L - x0 - .2) / .4)})`; x0 += per[k]; });
+    }
+    if (s.kind === "end") {
+      const lg = el.querySelector(".logo"); lg.style.opacity = ease(L / .5); lg.style.transform = `translateY(${(1 - ease(L / .6)) * 40}px)`;
+      el.querySelector(".line").style.opacity = clamp((L - .6) / .5);
+      el.querySelector(".sub").style.opacity = clamp((L - .9) / .5);
+      el.querySelectorAll(".pill").forEach((p, k) => { const q = back((L - 1.3 - k * .35) / .5); p.style.opacity = clamp((L - 1.3 - k * .35) / .3); p.style.transform = `translateX(-50%) scale(${.7 + .3 * q})`; });
+    }
+  });
+  const onEnd = cur.kind === "end";
+  document.getElementById("top").style.opacity = onEnd ? 0 : 1;
+  document.getElementById("prog").style.opacity = onEnd ? 0 : 1;
+  const c = document.getElementById("counter"); c.innerHTML = counter; c.style.opacity = counter ? 1 : 0;
+};
+</script>
+</body>
+</html>

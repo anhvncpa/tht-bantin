@@ -13,6 +13,8 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import requests
 
 WORKER = os.environ["WORKER_URL"].rstrip("/")
@@ -262,16 +264,34 @@ def main():
         p.write_bytes(requests.get(f"{WORKER}/api/internal/file/{requests.utils.quote(key, safe='')}", headers=H, timeout=60).content)
         frames.append(p)
     out = work / "story.mp4"
-    music, secs = make_video(frames, man.get("story_hook", ""), out)
-    log(f"video {secs:.1f}s, music={music}")
+    music, secs, kind = None, 0, "poster"
+    if man.get("video_style", "motion") == "motion" and man.get("motion_content"):
+        # Video chữ chuyển động (motion graphics) – lỗi thì tự lùi về kiểu lướt poster
+        try:
+            from motion import render_motion, from_content, pick_music
+            track = pick_music(MUSIC_DIR)
+            secs = render_motion(from_content(man["motion_content"], man.get("tht_phone", "0901 144 078"), man.get("tht_website", "thtaudit.com.vn")), out, track)
+            music, kind = (track.name if track else None), "motion"
+        except Exception as e:
+            log(f"motion lỗi, dùng kiểu poster: {e}")
+    if kind == "poster":
+        music, secs = make_video(frames, man.get("story_hook", ""), out)
+    log(f"video {kind} {secs:.1f}s, music={music}")
     requests.put(f"{WORKER}/api/internal/video/{job_id}", headers=H, data=out.read_bytes(), timeout=300)
 
-    results = [f"🎬 Video {secs:.0f}s, nhạc: {music or 'không có (thêm file vào thư mục music/)'}"]
+    results = [f"🎬 Video {'chữ chuyển động' if kind == 'motion' else 'lướt poster'} {secs:.0f}s, nhạc: {music or 'không có (thêm file vào thư mục music/)'}"]
     # Facebook Story: nếu có nhạc có lời trong music/story/ thì dựng riêng 1 bản video cho Story
     story_out = out
     if "story" in targets and tracks_in(STORY_MUSIC_DIR):
         story_out = work / "story_vocal.mp4"
-        smusic, _ = make_video(frames, man.get("story_hook", ""), story_out, music_dir=STORY_MUSIC_DIR)
+        strack = random.choice(tracks_in(STORY_MUSIC_DIR))
+        if kind == "motion":
+            af = f"afade=t=in:d=0.6,afade=t=out:st={max(0, secs - 1.5):.2f}:d=1.5,volume=0.7"
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out), "-stream_loop", "-1", "-i", str(strack), "-map", "0:v", "-map", "1:a",
+                            "-af", af, "-t", f"{secs:.2f}", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", str(story_out)], check=True)
+            smusic = strack.name
+        else:
+            smusic, _ = make_video(frames, man.get("story_hook", ""), story_out, music_dir=STORY_MUSIC_DIR)
         results.append(f"🎤 Story dùng nhạc có lời: {smusic}")
     tags = " ".join(man.get("hashtags", []))
     if man.get("dry_run"):

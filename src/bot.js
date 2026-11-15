@@ -384,7 +384,7 @@ async function offerLetter(env, job) {
 async function generate(env, job) {
   const parts = []; let table = null;
   const meta0 = JSON.parse((await kvGet(env, `meta:${job.id}`)) || "{}");
-  const srcLabel = { agent: "Agent dò tin", plan: "Kế hoạch tuần", video: "Video chính sách", manual: "Anh gửi" }[meta0.source] || "Anh gửi";
+  const srcLabel = { agent: "Agent dò tin", plan: "Kế hoạch tuần", video: "Video chính sách", manual: "Anh gửi", weekly: "Tổng hợp tuần", advice: "Tư vấn" }[meta0.source] || "Anh gửi";
   await hubEvent(env, { run: job.id, step: "draft", status: "start", runTitle: `${srcLabel}: ${(job.note || "").split("\n").find((l) => l.trim() && !/^VIDEO CHÍNH/.test(l))?.replace(/^(Tên|Tiêu đề|Tiêu đề đề xuất): /, "").slice(0, 90) || `${job.files.length} file`}`,
     title: `Bắt đầu soạn (${job.quality === "strong" ? "Opus – soạn kỹ" : "Sonnet"}) · nguồn: ${srcLabel}`, detail: (job.note || "").slice(0, 3000) || `${job.files.length} file: ${job.files.map((f) => f.name).join(", ")}` });
   for (const f of job.files) {
@@ -557,6 +557,13 @@ export async function internal(request, env, url) {
       hashtags: c.hashtags || [], tiktok_mode: env.TIKTOK_MODE || "inbox", tiktok_privacy: env.TIKTOK_PRIVACY || "SELF_ONLY",
       youtube_privacy: env.YOUTUBE_PRIVACY || "private",
       video_url: await mediaUrl(env, job.id, "story.mp4"),
+      // Video chữ chuyển động (motion graphics) – mặc định; VIDEO_STYLE="poster" để quay lại kiểu lướt poster
+      video_style: env.VIDEO_STYLE || "motion",
+      motion_content: { story_hook: c.story_hook, title_question: c.title_question, title_line1: c.title_line1, title_line2: c.title_line2, topic_short: c.topic_short,
+        doc_ref: c.doc_ref, highlight: c.highlight, points: c.points, actions: c.actions, style: job.style, theme: await videoTheme(env, job),
+        weekly: JSON.parse((await kvGet(env, `weekly:${job.id}`)) || "null")?.items || undefined,
+        week_label: JSON.parse((await kvGet(env, `weekly:${job.id}`)) || "null")?.label || undefined },
+      tht_phone: env.THT_PHONE || "0901 144 078", tht_website: env.THT_WEBSITE || "thtaudit.com.vn",
       reels_caption: fbCaption(c, env), ig_caption: igCaption(fbCaption(c, env)),
       ig_user_id: await igUserId(env, kvGet, kvSet).catch(() => ""),
     });
@@ -771,6 +778,56 @@ async function runTrends(env, chat, thenPlan = false) {
   if (thenPlan) await env.JOBS.send({ type: "plan" });
 }
 
+// Mẫu video (4 mẫu nền sáng/tối xen kẽ): theo tính chất bài, tránh trùng 2 video liền nhau
+const VIDEO_THEMES = ["gold", "paper", "green", "red"];
+const STYLE_THEME = { 1: "red", 2: "paper", 3: "green", 4: "gold", 5: "paper", 6: "gold" };
+async function videoTheme(env, job) {
+  const saved = await kvGet(env, `vtheme:${job.id}`);
+  if (saved) return saved;
+  const recent = JSON.parse((await kvGet(env, "vtheme:recent")) || "[]");
+  let th = (await kvGet(env, `weekly:${job.id}`)) ? "paper" : STYLE_THEME[job.style] || "gold";
+  if (recent[0] === th) th = VIDEO_THEMES.find((x) => !recent.slice(0, 2).includes(x)) || th;
+  await kvSet(env, `vtheme:${job.id}`, th);
+  await kvSet(env, "vtheme:recent", JSON.stringify([th, ...recent].slice(0, 3)));
+  return th;
+}
+
+// ---------------- Bản tin tổng hợp tuần (sáng Chủ nhật, thay bài thường ngày) ----------------
+async function runWeeklyDigest(env, chat, RUN) {
+  const since = new Date(Date.now() - 7 * 86400e3).toISOString();
+  const rows = (await env.DB.prepare("SELECT id, content, status, created_at FROM jobs WHERE created_at >= ? AND content IS NOT NULL AND status IN ('published','scheduled') ORDER BY created_at").bind(since).all()).results || [];
+  const items = [];
+  for (const r of rows) {
+    const meta = JSON.parse((await kvGet(env, `meta:${r.id}`)) || "{}");
+    if (meta.source === "weekly") continue;
+    let c; try { c = JSON.parse(r.content); } catch (_) { continue; }
+    const title = [c.title_line1, c.title_line2].filter(Boolean).join(" ");
+    if (!title || items.some((x) => x.title === title)) continue;
+    const act = (c.actions?.items || [])[0];
+    items.push({ title, line: [c.highlight?.value ? `${c.highlight.label}: ${c.highlight.value} ${c.highlight.unit || ""}`.trim() : "", act ? `Việc cần làm: ${act.title}${act.text ? " – " + act.text : ""}` : ""].filter(Boolean).join(" · "), doc: c.doc_ref || "", score: meta.panel_score || 0, published: !!meta.published });
+  }
+  if (items.length < 2) { await hubEvent(env, { run: RUN, step: "pick", status: "info", title: `Tuần này mới có ${items.length} tin – chưa đủ làm bản tổng hợp, chọn bài thường` }); return false; }
+  const top = items.sort((a, b) => (b.published - a.published) || (b.score - a.score)).slice(0, 5);
+  const d0 = new Date(Date.now() + 7 * 3600e3 - 6 * 86400e3), d1 = new Date(Date.now() + 7 * 3600e3);
+  const f = (d) => `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  const label = `Tuần ${f(d0)} – ${f(d1)}/${d1.getUTCFullYear()}`;
+  const note = [`BẢN TIN TỔNG HỢP TUẦN (${label}) của THT Audit – tổng hợp ${top.length} tin thuế – kế toán tiêu biểu đã đăng trong tuần:`,
+    ...top.map((x, i) => `${i + 1}. ${x.title}${x.doc ? ` (${x.doc})` : ""}${x.line ? ` – ${x.line}` : ""}`), "",
+    "Yêu cầu: tiêu đề dạng 'Tổng hợp tin thuế tuần' + mốc tuần; `points` = 3 tin quan trọng nhất (tên tin + điều doanh nghiệp cần nhớ); `actions` = 3 việc doanh nghiệp nên làm trong tuần tới (hạn chót gần nhất trước);",
+    "`facebook_caption` liệt kê đủ các tin bằng 1️⃣ 2️⃣ 3️⃣…, mỗi tin 1 dòng; mẫu poster 5 (infographic). Chỉ dùng thông tin trong danh sách trên, không thêm tin mới."].join("\n");
+  const job = { id: crypto.randomUUID().slice(0, 8), chat_id: chat, status: "working", files: [], style: "5", pages: "auto", quality: "strong", note, created_at: now() };
+  await saveJob(env, job);
+  await tagJob(env, kvSet, job.id, { source: "weekly", pillar: "hot", with_video: true, daily: true });
+  await kvSet(env, `weekly:${job.id}`, JSON.stringify({ label, items: top.map(({ title, line }) => ({ title, line })) }));
+  await kvSet(env, `day:${dayKey()}`, "1");
+  const wk = JSON.parse((await kvGet(env, `week:${weekKey()}`)) || '{"fb":0,"video":0}');
+  await kvSet(env, `week:${weekKey()}`, JSON.stringify({ fb: wk.fb + 1, video: wk.video + 1 }));
+  await hubEvent(env, { run: RUN, step: "pick", status: "done", title: `Chủ nhật: làm bản tin tổng hợp tuần (${top.length} tin)`, detail: top.map((x, i) => `${i + 1}. ${x.title}`).join("\n") });
+  await send(env, chat, `🗞 Bản tin tổng hợp tuần (${label}) – ${top.length} tin tiêu biểu:\n${top.map((x, i) => `${i + 1}. ${x.title}`).join("\n")}\nEm đang soạn poster + video tổng hợp, xong gửi anh duyệt…`);
+  await env.JOBS.send({ type: "generate", jobId: job.id });
+  return true;
+}
+
 // ---------------- Tự đăng khi anh chưa duyệt (kịp giờ vàng) ----------------
 // Chỉ áp dụng cho bản nháp do Agent tự làm (mặc định agent, plan, video, advice), đạt điểm hội đồng và không còn mục cần anh kiểm tra.
 function autoBlockReasons(env, job) {
@@ -786,7 +843,7 @@ function autoBlockReasons(env, job) {
 async function armAutoPublish(env, job) {
   if (env.AUTO_PUBLISH === "0") return "";
   const meta = JSON.parse((await kvGet(env, `meta:${job.id}`)) || "{}");
-  if (!list(env.AUTO_PUBLISH_SOURCES || "agent,plan,video,advice").includes(meta.source || "manual")) return "";
+  if (!list(env.AUTO_PUBLISH_SOURCES || "agent,plan,video,advice,weekly").includes(meta.source || "manual")) return "";
   const min = Number(env.AUTO_PUBLISH_MIN || 30);
   const block = autoBlockReasons(env, job);
   if (block.length) return `\n⏸ Bài này em sẽ KHÔNG tự đăng (${block.join(", ")}) – chờ anh duyệt.`;
@@ -1098,6 +1155,7 @@ async function runDaily(env) {
   if (env.VIDEO_ENABLED !== "0") { try { await runVideoScout(env); } catch (e) { console.log("vscout", e.message); } }
   // 2) bám chỉ tiêu tuần
   if (await kvGet(env, `day:${dayKey()}`)) return hubEvent(env, { run: RUN, step: "pick", status: "done", title: "Hôm nay đã có bài, không chọn thêm" });
+  if (env.WEEKLY_DIGEST !== "0" && vnNow().getUTCDay() === 0 && (await runWeeklyDigest(env, chat, RUN))) return;
   const st = await getStrategy(env, kvGet);
   const wk = JSON.parse((await kvGet(env, `week:${weekKey()}`)) || '{"fb":0,"video":0}');
   const target = st.weekly_targets || { fb_posts: 7, videos: 4 };
