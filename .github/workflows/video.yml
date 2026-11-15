@@ -1,10 +1,10 @@
 name: video
-# Được Worker gọi khi anh bấm đăng Story / TikTok / YouTube trên Telegram
+# Được Worker gọi khi anh bấm đăng Story / Reels / TikTok / YouTube trên Telegram
 on:
   workflow_dispatch:
     inputs:
       job_id: { description: "Mã bài", required: true }
-      targets: { description: "story,tiktok,youtube", required: true }
+      targets: { description: "story,tiktok,youtube,reels,igreels", required: true }
 
 concurrency:
   group: video-${{ inputs.job_id }}
@@ -12,13 +12,14 @@ concurrency:
 jobs:
   build-and-post:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Cài công cụ
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core > /dev/null
-          pip install -q requests
+          pip install -q requests playwright
+          python -m playwright install --with-deps chromium > /dev/null
       - name: Dựng video và đăng
         env:
           WORKER_URL: ${{ secrets.WORKER_URL }}
