@@ -118,7 +118,9 @@ window.setup = function (data) {
   if (data.brand_label) document.getElementById("brandtxt").textContent = data.brand_label;
   const root = document.getElementById("scenes"); root.innerHTML = ""; SC = [];
   let ptIdx = 0;
+  const VD = data.vdur || [];   // thời lượng giọng đọc từng cảnh (giây) → cảnh kéo dài cho đọc hết
   const add = (kind, dur, html) => {
+    if (VD[SC.length]) dur = Math.max(dur, VD[SC.length] + (kind === "end" ? 1.2 : .8));
     let mode = TH.seq[kind]; if (Array.isArray(mode)) mode = mode[ptIdx++ % mode.length];
     const el = document.createElement("div"); el.className = `scene ${mode} ${TH.mark ? "mark" : ""} s-${kind}${kind === "end" ? " end" : ""}`;
     el.style.setProperty("--acc", TH.acc[mode]);
@@ -151,8 +153,10 @@ window.setup = function (data) {
   if (data.actions?.length) {
     const ck = '<svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const per = data.actions.map((a) => clamp(.9 + nWords(`${a.title} ${a.text}`) * .2, 1.5, 2.6));
-    const e = add("ac", 1.0 + per.reduce((x, y) => x + y, 0) + 1.2, `<div class="ac"><div class="eyebrow">${esc(data.actions_label || "VIỆC CẦN LÀM NGAY")}</div>${data.actions.map((a) => `<div class="row"><div class="ck">${ck}</div><div><div class="tt">${esc(a.title)}</div><div class="tx">${esc(a.text || "")}</div></div></div>`).join("")}</div>`);
-    e.dataset.per = JSON.stringify(per);
+    const sum = per.reduce((x, y) => x + y, 0);
+    const e = add("ac", 1.0 + sum + 1.2, `<div class="ac"><div class="eyebrow">${esc(data.actions_label || "VIỆC CẦN LÀM NGAY")}</div>${data.actions.map((a) => `<div class="row"><div class="ck">${ck}</div><div><div class="tt">${esc(a.title)}</div><div class="tx">${esc(a.text || "")}</div></div></div>`).join("")}</div>`);
+    const k = (SC[SC.length - 1].dur - 2.2) / sum;   // có giọng đọc dài hơn → giãn đều nhịp hiện từng dòng
+    e.dataset.per = JSON.stringify(k > 1 ? per.map((x) => x * k) : per);
   }
   // 6. thẻ kết
   add("end", 4.6, `<div class="logo">${SYM()}<div class="wmk"><div class="tt">THT</div><div class="rl"></div><div class="ss">AUDITING &amp; CONSULTING</div></div></div>
@@ -174,6 +178,7 @@ window.setup = function (data) {
   return TOTAL;
 };
 window.cues = () => CUES;
+window.scenes = () => SC.map((s) => ({ kind: s.kind, start: s.start, dur: s.dur, wipe: s.wipe }));
 
 function wordsIn(el, lt, start = 0, step = .08, dur = .5) {
   el.querySelectorAll(".word").forEach((w, i) => { const p = ease((lt - start - i * step) / dur); w.style.opacity = p; w.style.transform = `translateY(${(1 - p) * 60}px)`; });

@@ -559,6 +559,7 @@ export async function internal(request, env, url) {
       video_url: await mediaUrl(env, job.id, "story.mp4"),
       // Video chữ chuyển động (motion graphics) – mặc định; VIDEO_STYLE="poster" để quay lại kiểu lướt poster
       video_style: env.VIDEO_STYLE || "motion",
+      voice: env.VIDEO_VOICE !== "0",   // giọng đọc nam (Gemini TTS miễn phí → Edge TTS); đặt VIDEO_VOICE=0 để tắt
       motion_content: { story_hook: c.story_hook, title_question: c.title_question, title_line1: c.title_line1, title_line2: c.title_line2, topic_short: c.topic_short,
         doc_ref: c.doc_ref, highlight: c.highlight, points: c.points, actions: c.actions, style: job.style, theme: await videoTheme(env, job),
         weekly: JSON.parse((await kvGet(env, `weekly:${job.id}`)) || "null")?.items || undefined,

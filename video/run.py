@@ -265,6 +265,7 @@ def main():
         frames.append(p)
     out = work / "story.mp4"
     music, secs, kind, why = None, 0, "poster", ""
+    voice_name, voice_err = None, None
     if man.get("video_style", "motion") == "motion" and not man.get("motion_content"):
         why = "Worker chưa có bản bot.js mới (thiếu dữ liệu video chữ chuyển động)"
     if man.get("video_style", "motion") == "motion" and man.get("motion_content"):
@@ -272,8 +273,10 @@ def main():
         try:
             from motion import render_motion, from_content, pick_music
             track = pick_music(MUSIC_DIR)
-            secs = render_motion(from_content(man["motion_content"], man.get("tht_phone", "0901 144 078"), man.get("tht_website", "thtaudit.com.vn")), out, track)
+            mdata = from_content(man["motion_content"], man.get("tht_phone", "0901 144 078"), man.get("tht_website", "thtaudit.com.vn"))
+            secs = render_motion(mdata, out, track, voice=man.get("voice", True))
             music, kind = (track.name if track else None), "motion"
+            voice_name, voice_err = mdata.get("voice_name"), mdata.get("voice_error")
         except Exception as e:
             why = f"{type(e).__name__}: {str(e)[:160]}"
             log(f"motion lỗi, dùng kiểu poster: {e}")
@@ -283,10 +286,12 @@ def main():
     requests.put(f"{WORKER}/api/internal/video/{job_id}", headers=H, data=out.read_bytes(), timeout=300)
 
     results = [f"🎬 Video {'chữ chuyển động' if kind == 'motion' else 'lướt poster'} {secs:.0f}s, nhạc: {music or 'không có (thêm file vào thư mục music/)'}"
+               + (f"\n🎙 Giọng đọc: {voice_name}" if voice_name else "")
+               + (f"\n⚠️ Chưa có giọng đọc: {voice_err}" if voice_err else "")
                + (f"\n⚠️ Chưa dựng được kiểu chữ chuyển động: {why}" if why else "")]
     # Facebook Story: nếu có nhạc có lời trong music/story/ thì dựng riêng 1 bản video cho Story
     story_out = out
-    if "story" in targets and tracks_in(STORY_MUSIC_DIR):
+    if "story" in targets and tracks_in(STORY_MUSIC_DIR) and not voice_name:   # có giọng đọc thì Story giữ nguyên giọng
         story_out = work / "story_vocal.mp4"
         strack = random.choice(tracks_in(STORY_MUSIC_DIR))
         if kind == "motion":

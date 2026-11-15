@@ -14,10 +14,25 @@ HERE = Path(__file__).resolve().parent
 FPS = 30
 
 
-def render_motion(data, out, music=None, fps=FPS):
+VOICE_LEAD = 0.45   # giọng bắt đầu sau khi cảnh hiện 0,45 s (chờ hiệu ứng quét nền)
+
+
+def render_motion(data, out, music=None, fps=FPS, voice=None):
+    """voice: None = theo biến VOICE (mặc định bật). Kết quả giọng ghi vào data['voice_name'] / data['voice_error']."""
     from playwright.sync_api import sync_playwright
 
     out = Path(out)
+    segs = []
+    if voice if voice is not None else os.environ.get("VOICE", "1") != "0":
+        try:
+            from voice import script_for, synthesize
+            segs, name = synthesize(script_for(data), out.with_name(out.stem + "_voice"))
+            if segs:
+                data["vdur"] = [x["dur"] for x in segs]; data["voice_name"] = name
+            else:
+                data["voice_error"] = name
+        except Exception as e:  # giọng đọc lỗi không được làm hỏng video
+            data["voice_error"] = f"{type(e).__name__}: {str(e)[:140]}"
     tmp = out.with_name(out.stem + ".tmp.mp4")
     silent = out.with_name(out.stem + ".silent.mp4")
     with sync_playwright() as p:
@@ -38,9 +53,13 @@ def render_motion(data, out, music=None, fps=FPS):
         if enc.wait() != 0:
             raise RuntimeError("ffmpeg dựng hình lỗi")
         cues = page.evaluate("cues()")
+        scenes = page.evaluate("scenes()")
         browser.close()
+    voices = [(sc["start"] + VOICE_LEAD, sg["file"]) for sc, sg in zip(scenes, segs)] if len(scenes) == len(segs) else []
+    if segs and not voices:
+        data["voice_error"] = "số cảnh không khớp lời đọc"; data.pop("voice_name", None)
     tmp.rename(silent)
-    mix_audio(silent, tmp, total, music, cues)
+    mix_audio(silent, tmp, total, music, cues, voices)
     tmp.replace(out)
     silent.unlink(missing_ok=True)
     return total
@@ -56,6 +75,7 @@ SFX = {
     "impact": "aevalsrc='0.9*sin(2*PI*55*t)*exp(-5*t)+0.35*sin(2*PI*110*t)*exp(-9*t)':d=0.9",
 }
 SFX_VOL = {"whoosh": 0.9, "swish": 0.6, "pop": 0.7, "tick": 0.6, "impact": 1.0}
+SFX_VOL_VOICE = 0.6   # có giọng đọc → hiệu ứng nhỏ lại để không lấn lời
 ENERGETIC = ("kich-tinh", "hien-dai", "soi-dong", "upbeat")
 
 
@@ -72,22 +92,39 @@ def pick_music(music_dir, rng=None):
     return rng.choice(pool) if pool else None
 
 
-def mix_audio(video, out, total, music, cues):
+def mix_audio(video, out, total, music, cues, voices=None):
     inputs, chains, labels = ["-i", str(video)], [], []
     idx = 1
+    vlabels = []
+    for k, (t, f) in enumerate(voices or []):
+        ms = int(t * 1000)
+        inputs += ["-i", str(f)]
+        chains.append(f"[{idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,highpass=f=70,"
+                      f"acompressor=threshold=0.1:ratio=3:attack=5:release=120,volume=1.6,adelay={ms}|{ms}[v{k}]")
+        vlabels.append(f"[v{k}]"); idx += 1
+    if vlabels:
+        chains.append(f"{''.join(vlabels)}amix=inputs={len(vlabels)}:duration=longest:normalize=0,apad=whole_dur={total:.2f},asplit=2[vo][vsc]")
     if music and Path(music).exists():
         inputs += ["-stream_loop", "-1", "-i", str(music)]
         chains.append(f"[{idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{total:.2f},"
-                      f"acompressor=threshold=0.25:ratio=3:attack=10:release=200,bass=g=3,volume=0.7,"
-                      f"afade=t=in:d=0.5,afade=t=out:st={max(0, total - 1.6):.2f}:d=1.6[m]")
+                      f"acompressor=threshold=0.25:ratio=3:attack=10:release=200,bass=g=3,volume={0.45 if vlabels else 0.7},"
+                      f"afade=t=in:d=0.5,afade=t=out:st={max(0, total - 1.6):.2f}:d=1.6[m0]")
+        if vlabels:   # nhạc tự nhỏ xuống khi có giọng đọc
+            chains.append("[m0][vsc]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=450:makeup=1[m]")
+        else:
+            chains.append("[m0]anull[m]")
         labels.append("[m]"); idx += 1
+    elif vlabels:
+        chains.append("[vsc]anullsink")
+    if vlabels:
+        labels.append("[vo]")
     for k, c in enumerate(cues or []):
         src = SFX.get(c.get("k"))
         if not src or c["t"] >= total - 0.1:
             continue
         ms = int(c["t"] * 1000)
         inputs += ["-f", "lavfi", "-i", src]
-        chains.append(f"[{idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={SFX_VOL.get(c['k'], 0.7)},adelay={ms}|{ms}[s{k}]")
+        chains.append(f"[{idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={SFX_VOL.get(c['k'], 0.7) * (SFX_VOL_VOICE if voices else 1):.2f},adelay={ms}|{ms}[s{k}]")
         labels.append(f"[s{k}]"); idx += 1
     if not labels:
         inputs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
@@ -140,4 +177,4 @@ if __name__ == "__main__":
     if "title_line1" in d:
         d = from_content(d)
     secs = render_motion(d, sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
-    print(f"ok {secs:.1f}s")
+    print(f"ok {secs:.1f}s giọng: {d.get('voice_name') or d.get('voice_error')}")
