@@ -17,6 +17,10 @@ import { postInstagram, igCaption, postThreads, mediaUrl, igUserId } from "./soc
 import { researchTrends, trendMessage } from "./trends.js";
 import { researchAdvice, reviseAdvice, adviceSource, adviceSummary, letterHtml, htmlToPdf, saveLetter, nextLetterNumber, syncLetter, retryLetterSync, letterFileName } from "./advice.js";
 import { sendDocument } from "./telegram.js";
+import { councilReview, panelText, verifyUncertain } from "./council.js";
+import { posterQA, qaText, crossCheck, adviceFacts, mismatchesToUncertain } from "./gemini.js";
+import { pageToken } from "./facebook.js";
+import { threadsToken } from "./social.js";
 
 // Kênh đăng: "all" = bài ảnh/chữ, "allv" = kèm các kênh video (dựng trên GitHub Actions)
 const POST_TARGETS = (env) => list(env.POST_TARGETS || "fb,story,ig,threads");
@@ -230,6 +234,7 @@ export async function handleUpdate(update, env) {
     const editing = await kvGet(env, editKey(chat, uid));
     if (editing) {
       await kvDel(env, editKey(chat, uid));
+      await kvDel(env, `ap:${editing}`);
       await send(env, chat, "Đang sửa theo yêu cầu…");
       return env.JOBS.send({ type: "revise", jobId: editing, instruction: m.text });
     }
@@ -269,6 +274,7 @@ async function onButton(q, env) {
   }
   const job = await getJob(env, id);
   if (!job) return send(env, chat, "Bài này không còn, gửi file để làm bài mới.");
+  await kvDel(env, `ap:${id}`); // anh đã thao tác → không tự đăng nữa
   const clearKb = () => tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } });
 
   if (act === "st") {
@@ -348,6 +354,7 @@ export async function processTask(task, env) {
   if (task.type === "advise") return runAdvise(env, task.chat, task.q);
   if (task.type === "advletter") return makeAdviceLetter(env, task.advId, task.instruction);
   if (task.type === "advok") return approveAdviceLetter(env, task.advId);
+  if (task.type === "autopub") return runAutoPublish(env, task.jobId, task.token);
   const job = await getJob(env, task.jobId);
   if (!job) return;
   env = { ...env, HUB_RUN: job.id };
@@ -392,6 +399,16 @@ async function generate(env, job) {
   await hubEvent(env, { run: job.id, step: "draft", status: "done", title: `Bản nháp: ${draft?.title || finalTitle}`,
     detail: `KẾT QUẢ KIỂM CHỨNG WEB:\n${checks || "(không kiểm chứng)"}${content.corrections?.length ? "\n\nĐÃ CHỈNH SO VỚI NGUỒN:\n- " + content.corrections.join("\n- ") : ""}${content.uncertain?.length ? "\n\nCHƯA CHẮC, CẦN ANH KIỂM TRA:\n- " + content.uncertain.join("\n- ") : ""}` });
   job.content = content; job.checks = checks;
+  if (env.COUNCIL_ENABLED !== "0") {
+    await hubEvent(env, { run: job.id, step: "council", status: "start", title: "Hội đồng đánh giá: người đọc · giám đốc DN · tăng trưởng · kiểm tra thông tin" });
+    try {
+      hubTag(env, "council", "Hội đồng đánh giá");
+      job.content = await councilReview(env, content);
+      const meta = JSON.parse((await kvGet(env, `meta:${job.id}`)) || "{}");
+      await kvSet(env, `meta:${job.id}`, JSON.stringify({ ...meta, panel_score: job.content.panel?.score }));
+      await hubEvent(env, { run: job.id, step: "council", status: "done", title: `Hội đồng chấm ${job.content.panel?.score}/10${job.content.panel?.edits ? " – đã tự sửa" : ""}`, detail: panelText(job.content.panel) + (job.content.panel?.edits ? "\n\nCHỈ DẪN SỬA:\n" + job.content.panel.edits : "") });
+    } catch (e) { await hubEvent(env, { run: job.id, step: "council", status: "error", title: `Hội đồng lỗi: ${e.message}` }); }
+  }
   await attachShare(env, job);
   if (!job.style || job.style === "auto") {
     job.style = STYLE_NAMES[content.style] ? content.style : String(((Number(recent[0]) || 0) % 6) + 1);
@@ -418,6 +435,27 @@ async function generate(env, job) {
 async function renderAndPreview(env, job, lookupRows = 0) {
   if (job.content) job.content.facebook_caption = withFbFooter(job.content.facebook_caption);
   job.render = await renderJob(env, job);
+  // Gemini soát poster bằng hình ảnh; lỗi tràn chữ / chính tả / lệch số → tự sửa và dựng lại 1 lần
+  try {
+    const imgs = [];
+    for (const k of job.render.pages) imgs.push(new Uint8Array(await (await env.FILES.get(k)).arrayBuffer()));
+    let qa = await posterQA(env, imgs, job.content);
+    const serious = (q) => (q?.issues || []).filter((i) => ["overflow", "typo", "mismatch"].includes(i.type));
+    if (serious(qa).length && !job.content.qa_fixed) {
+      await hubEvent(env, { run: job.id, step: "render", status: "info", title: `Gemini thấy ${serious(qa).length} lỗi trên poster – tự sửa và dựng lại`, detail: qaText(qa) });
+      const off = job.content.bilingual_off, share = job.content.share, panel = job.content.panel;
+      const fixed = await reviseContent(env, job.content, "Sửa các lỗi soát poster sau (giữ nguyên phần khác):\n" + serious(qa).map((i) => `- ${i.detail}${i.fix ? " → " + i.fix : ""}`).join("\n"), "fast");
+      if (fixed) {
+        job.content = { ...fixed, bilingual_off: off, share, panel, uncertain: job.content.uncertain, qa_fixed: true };
+        job.content.facebook_caption = withFbFooter(job.content.facebook_caption);
+        job.render = await renderJob(env, job);
+        imgs.length = 0;
+        for (const k of job.render.pages) imgs.push(new Uint8Array(await (await env.FILES.get(k)).arrayBuffer()));
+        qa = await posterQA(env, imgs, job.content);
+      }
+    }
+    if (qa) { job.content.qa = qa; await hubEvent(env, { run: job.id, step: "render", status: serious(qa).length ? "info" : "done", title: serious(qa).length ? `Poster còn ${serious(qa).length} lỗi cần anh xem` : "Gemini soát poster: không thấy lỗi", detail: qaText(qa) }); }
+  } catch (e) { console.log("posterQA", e.message); }
   await hubEvent(env, { run: job.id, step: "render", status: "done", title: `Dựng ${job.render.pages.length} trang poster mẫu ${job.style} – ${STYLE_NAMES[job.style]}${job.content?.bilingual_off ? " (chỉ tiếng Việt)" : " (song ngữ)"}` });
   job.status = "review";
   await saveJob(env, job);
@@ -427,13 +465,15 @@ async function renderAndPreview(env, job, lookupRows = 0) {
   await sendAlbum(env, job.chat_id, images, `Bản xem trước · mẫu ${job.style} – ${STYLE_NAMES[job.style]}${c.style === job.style && c.style_reason ? ` (em chọn vì: ${c.style_reason})` : ""} · ${images.length} trang`);
   const notes = [];
   if (c.corrections?.length) notes.push("⚠️ Đã chỉnh so với nguồn:\n" + c.corrections.map((x) => `• ${x}`).join("\n"));
-  if (c.uncertain?.length) notes.push("❓ Cần anh kiểm tra:\n" + c.uncertain.map((x) => `• ${x}`).join("\n"));
+  if (c.panel) notes.push(panelText(c.panel));
+  if (c.qa) notes.push(qaText(c.qa) + (c.qa_fixed ? "\n(đã tự sửa và dựng lại 1 lần)" : ""));
+  if (c.uncertain?.length) notes.push("❓ Còn cần anh kiểm tra (em chưa tự xác nhận được):\n" + c.uncertain.map((x) => `• ${x}`).join("\n"));
   if (lookupRows) notes.push(`🔎 Trang tra cứu ${lookupRows.toLocaleString("vi-VN")} dòng: ${job.qr_url} (mã QR trỏ tới đây)`);
   if (notes.length) await send(env, job.chat_id, notes.join("\n\n"));
   await send(env, job.chat_id, "📘 Bài Facebook (chuẩn SEO):\n\n" + fbCaption(c, env));
   await send(env, job.chat_id,
     `▶️ YouTube: ${c.youtube_title}\n🎵 TikTok/Story mở đầu: “${c.story_hook}”\n🔑 Từ khoá: ${(c.seo_keywords || []).join(", ")}\n\n` +
-    `Duyệt và chọn nơi đăng${env.DRY_RUN === "1" ? " (CHẾ ĐỘ THỬ – không đăng thật)" : ""}:`, reviewKb(job.id, await wantsVideo(env, job.id)));
+    `Duyệt và chọn nơi đăng${env.DRY_RUN === "1" ? " (CHẾ ĐỘ THỬ – không đăng thật)" : ""}:${await armAutoPublish(env, job)}`, reviewKb(job.id, await wantsVideo(env, job.id)));
   await hubEvent(env, { run: job.id, step: "review", status: "waiting", title: "Đã gửi bản xem trước vào Telegram – chờ anh duyệt" });
 }
 
@@ -488,6 +528,7 @@ async function publish(env, job, targets) {
   const vLine = out.find((x) => x.startsWith("🎬"));
   if (vLine) await hubEvent(env, { run: job.id, step: "video", status: /Không khởi động/.test(vLine) ? "error" : "start", title: vLine });
   await send(env, job.chat_id, out.join("\n"), retryKb(job.id, out));
+  if (!dry) await kvSet(env, `audit:${job.id}`, JSON.stringify({ at: Date.now(), lines: out, video: video.length ? video : [], vres: null }));
 }
 
 async function dispatchVideo(env, jobId, targets) {
@@ -539,6 +580,8 @@ export async function internal(request, env, url) {
     if (job) {
       await hubEvent(env, { run: job.id, step: "video", status: results.some((r) => /lỗi/i.test(r)) ? "error" : "done", title: (results.join(" · ") || "Luồng video đã chạy xong").slice(0, 280), detail: results.join("\n") });
       await send(env, job.chat_id, results.join("\n") || "Luồng video đã chạy xong.", retryKb(job.id, results));
+      const au = JSON.parse((await kvGet(env, `audit:${id}`)) || "null");
+      if (au) { au.vres = results; await kvSet(env, `audit:${id}`, JSON.stringify(au)); }
       // TikTok (hộp thư) không nhận nội dung qua API → gửi riêng caption dạng chạm-để-copy để dán khi bấm Đăng trong app
       const cap = job.content?.tiktok_caption;
       if (cap && results.some((r) => r.startsWith("🎵 TikTok:") && r.includes("hộp thư"))) {
@@ -640,6 +683,7 @@ async function scheduleList(env) {
 
 async function runDue(env) {
   try { await retryLetterSync(env); } catch (e) { console.log("letter sync", e.message); }
+  try { await runAudit(env); } catch (e) { console.log("audit", e.message); }
   const rows = (await env.DB.prepare("SELECT k, v FROM kv WHERE k LIKE 'sched:%'").all()).results || [];
   for (const r of rows) {
     const it = JSON.parse(r.v);
@@ -727,6 +771,123 @@ async function runTrends(env, chat, thenPlan = false) {
   if (thenPlan) await env.JOBS.send({ type: "plan" });
 }
 
+// ---------------- Tự đăng khi anh chưa duyệt (kịp giờ vàng) ----------------
+// Chỉ áp dụng cho bản nháp do Agent tự làm (mặc định agent, plan, video, advice), đạt điểm hội đồng và không còn mục cần anh kiểm tra.
+function autoBlockReasons(env, job) {
+  const c = job.content || {}, r = [];
+  const min = Number(env.AUTO_PUBLISH_MIN_SCORE || 7);
+  if (c.uncertain?.length) r.push(`còn ${c.uncertain.length} mục cần anh kiểm tra`);
+  const qaBad = (c.qa?.issues || []).filter((i) => ["overflow", "typo", "mismatch"].includes(i.type)).length;
+  if (qaBad) r.push(`poster còn ${qaBad} lỗi hiển thị/chính tả`);
+  if (env.COUNCIL_ENABLED !== "0" && (c.panel?.score ?? 0) < min) r.push(`điểm hội đồng ${c.panel?.score ?? "?"}/10 < ${min}`);
+  if (env.DRY_RUN === "1") r.push("đang chế độ thử");
+  return r;
+}
+async function armAutoPublish(env, job) {
+  if (env.AUTO_PUBLISH === "0") return "";
+  const meta = JSON.parse((await kvGet(env, `meta:${job.id}`)) || "{}");
+  if (!list(env.AUTO_PUBLISH_SOURCES || "agent,plan,video,advice").includes(meta.source || "manual")) return "";
+  const min = Number(env.AUTO_PUBLISH_MIN || 30);
+  const block = autoBlockReasons(env, job);
+  if (block.length) return `\n⏸ Bài này em sẽ KHÔNG tự đăng (${block.join(", ")}) – chờ anh duyệt.`;
+  const token = String(Date.now());
+  await kvSet(env, `ap:${job.id}`, token);
+  await env.JOBS.send({ type: "autopub", jobId: job.id, token }, { delaySeconds: Math.min(min * 60, 43000) });
+  return `\n⏱ Sau ${min} phút anh chưa bấm gì, em sẽ tự hẹn đăng vào giờ vàng gần nhất.`;
+}
+async function runAutoPublish(env, jobId, token) {
+  if ((await kvGet(env, `ap:${jobId}`)) !== token) return;
+  await kvDel(env, `ap:${jobId}`);
+  const job = await getJob(env, jobId);
+  if (!job || job.status !== "review" || !job.content || !job.render) return;
+  const block = autoBlockReasons(env, job);
+  if (block.length) return send(env, job.chat_id, `⏸ Không tự đăng “${job.content.title_line1 || job.id}”: ${block.join(", ")}.`);
+  const at = nextSlots(env, 1)[0];
+  const targets = expandTargets(env, (env.AGENT_TARGETS || "all") + ((await wantsVideo(env, jobId)) ? "," + VIDEO_TARGETS(env).join(",") : "")).join(",");
+  await kvSet(env, `sched:${jobId}`, JSON.stringify({ at, targets }));
+  job.status = "scheduled"; await saveJob(env, job);
+  const meta = JSON.parse((await kvGet(env, `meta:${jobId}`)) || "{}");
+  await kvSet(env, `meta:${jobId}`, JSON.stringify({ ...meta, auto_published: true }));
+  await hubEvent(env, { run: jobId, step: "review", status: "done", title: `Tự duyệt (anh chưa bấm sau ${env.AUTO_PUBLISH_MIN || 30} phút) – hẹn đăng ${vnLabel(at)}` });
+  await send(env, job.chat_id, `⏰ Anh chưa duyệt sau ${env.AUTO_PUBLISH_MIN || 30} phút → em tự hẹn đăng “${job.content.title_line1 || jobId}” lúc ${vnLabel(at)} lên ${targetsLabel(targets)}.`,
+    keyboard([[["🚫 Huỷ hẹn", `uc:${jobId}`], ["✅ Đăng ngay", `pub:${jobId}:${(await wantsVideo(env, jobId)) ? "allv" : "all"}`]]]));
+}
+
+// ---------------- Agent kiểm tra sau đăng ----------------
+// Mỗi 15 phút: bài đã đăng 8 phút – 3 giờ → kiểm tra từng kênh còn hiển thị không, luồng video đã báo về chưa; báo 1 lần.
+async function runAudit(env) {
+  const rows = (await env.DB.prepare("SELECT k, v FROM kv WHERE k LIKE 'audit:%'").all()).results || [];
+  for (const r of rows) {
+    const a = JSON.parse(r.v), id = r.k.slice(6), age = Date.now() - a.at;
+    if (age < 8 * 60e3) continue;
+    const waitingVideo = a.video.length && !a.vres;
+    if (waitingVideo && age < 30 * 60e3) continue;
+    await kvDel(env, r.k);
+    if (age > 3 * 3600e3) continue;
+    const job = await getJob(env, id);
+    if (!job) continue;
+    const ok = [], bad = [], warn = [];
+    const line = (p) => a.lines.find((l) => l.startsWith(p)) || "";
+    const urlOf = (l) => (l.match(/https?:\/\/\S+/) || [])[0] || "";
+    const g = `https://graph.facebook.com/${env.FB_GRAPH_VERSION || "v26.0"}`;
+    // Facebook
+    const fb = line("📘");
+    if (fb) {
+      if (/lỗi/i.test(fb)) bad.push("📘 Facebook: đăng lỗi");
+      else {
+        try {
+          const pid = urlOf(fb).split("/").pop();
+          const j = await (await fetch(`${g}/${pid}?fields=id,is_published,permalink_url&access_token=${encodeURIComponent(await pageToken(env))}`)).json();
+          j.id && j.is_published !== false ? ok.push("📘 Facebook") : bad.push(`📘 Facebook: không thấy bài (${j.error?.message || "chưa hiển thị"})`);
+        } catch (e) { warn.push(`📘 Facebook: chưa kiểm tra được (${e.message})`); }
+      }
+    }
+    // Instagram
+    const ig = line("📸");
+    if (ig && !/bỏ qua|chế độ thử/.test(ig)) {
+      if (/lỗi/i.test(ig)) bad.push("📸 Instagram: đăng lỗi");
+      else {
+        try {
+          const igId = env.IG_USER_ID || (await kvGet(env, "ig:user"));
+          const j = await (await fetch(`${g}/${igId}/media?fields=permalink&limit=15&access_token=${encodeURIComponent(env.FB_PAGE_TOKEN)}`)).json();
+          const u = urlOf(ig).replace(/\/$/, "");
+          (j.data || []).some((m) => (m.permalink || "").replace(/\/$/, "") === u) ? ok.push("📸 Instagram") : bad.push("📸 Instagram: không thấy bài trên trang");
+        } catch (e) { warn.push(`📸 Instagram: chưa kiểm tra được (${e.message})`); }
+      }
+    }
+    // Threads
+    const th = line("🧵");
+    if (th && !/bỏ qua|chế độ thử/.test(th)) {
+      if (/lỗi/i.test(th)) bad.push("🧵 Threads: đăng lỗi");
+      else {
+        try {
+          const t = await threadsToken(env, kvGet, kvSet);
+          const j = await (await fetch(`https://graph.threads.net/v1.0/me/threads?fields=permalink&limit=15&access_token=${encodeURIComponent(t.access_token)}`)).json();
+          const u = urlOf(th).replace(/\/$/, "");
+          (j.data || []).some((m) => (m.permalink || "").replace(/\/$/, "") === u) ? ok.push("🧵 Threads") : bad.push("🧵 Threads: không thấy bài trên trang");
+        } catch (e) { warn.push(`🧵 Threads: chưa kiểm tra được (${e.message})`); }
+      }
+    }
+    // Video
+    if (a.video.length) {
+      if (!a.vres) bad.push("🎬 Video: luồng dựng video chưa báo về sau 30 phút (GitHub Actions có thể lỗi)");
+      else for (const l of a.vres) {
+        if (!/^(📱|🎵|▶️|🎞)/.test(l)) continue;
+        const name = l.split(":")[0];
+        if (/lỗi/i.test(l)) bad.push(`${name}: đăng lỗi`);
+        else if (/Chỉ mình tôi|hộp thư/.test(l)) warn.push(`${name}: đang ở chế độ riêng tư/hộp thư – cần anh mở app để công khai`);
+        else if (/\(private\)/.test(l)) warn.push(`${name}: đang riêng tư – vào YouTube Studio chuyển Công khai`);
+        else ok.push(name);
+      }
+    }
+    const total = ok.length + bad.length;
+    const head = `🔍 Kiểm tra sau đăng “${job.content?.title_line1 || id}”: ${ok.length}/${total} kênh OK`;
+    const msg = [head, ok.length ? "✅ " + ok.join(" · ") : "", bad.length ? "❌ Lỗi:\n" + bad.map((x) => `• ${x}`).join("\n") : "", warn.length ? "⚠️ Lưu ý:\n" + warn.map((x) => `• ${x}`).join("\n") : ""].filter(Boolean).join("\n");
+    await hubEvent(env, { run: id, step: "audit", status: bad.length ? "error" : "done", title: head, detail: msg });
+    if (bad.length || warn.length || env.AUDIT_REPORT_OK !== "0") await send(env, job.chat_id, msg, bad.length ? retryKb(id, bad.map((b) => `${b} lỗi`)) : {});
+  }
+}
+
 // ---------------- Tư vấn theo yêu cầu: Thư tư vấn PDF + Poster ----------------
 async function runAdvise(env, chat, q) {
   const id = "tv" + crypto.randomUUID().slice(0, 6);
@@ -738,10 +899,20 @@ async function runAdvise(env, chat, q) {
     await hubEvent(env, { run: `adv-${id}`, step: "scout", status: "error", title: `Tra cứu lỗi: ${e.message}` });
     return send(env, chat, `🔎 Tra cứu bị lỗi: ${e.message}\nAnh gõ lại /tuvan để thử lần nữa.`);
   }
+  try { const g = await crossCheck(env, adviceFacts(a)); if (Array.isArray(g)) { a.uncertain = [...(a.uncertain || []), ...mismatchesToUncertain(g)]; a.gemini = g; } } catch (_) {}
+  if (a.uncertain?.length && env.COUNCIL_ENABLED !== "0") {
+    try {
+      const checks = await verifyUncertain(env, a.uncertain, a.subject);
+      const fixes = checks.filter((c) => c.status === "corrected" && c.fix).map((c) => `Sửa thông tin: ${c.fix}`);
+      if (fixes.length) { try { Object.assign(a, await reviseAdvice(env, a, fixes.join("\n"))); } catch (_) {} }
+      a.uncertain = checks.filter((c) => c.status === "unresolved").map((c) => c.item);
+      a.verified = checks.filter((c) => c.status !== "unresolved").map((c) => `${c.status === "corrected" ? "✏️ đã sửa" : "✅ đã xác nhận"}: ${c.item} → ${c.finding}`);
+    } catch (_) {}
+  }
   const adv = { ...a, id, chat, ask: q, created_at: new Date().toISOString() };
   await kvSet(env, `adv:${id}`, JSON.stringify(adv));
   await hubEvent(env, { run: `adv-${id}`, step: "draft", status: "waiting", title: `Đã có nội dung: ${a.subject} – chờ anh chọn đầu ra`, detail: adviceSummary(a) });
-  await send(env, chat, adviceSummary(a), advKb(id));
+  await send(env, chat, adviceSummary(a) + (a.verified?.length ? "\n\n🔎 Em đã tự kiểm tra:\n" + a.verified.map((x) => `• ${x}`).join("\n") : ""), advKb(id));
 }
 
 async function onAdviceButton(env, chat, uid, q, id, arg) {

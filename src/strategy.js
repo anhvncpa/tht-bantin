@@ -2,6 +2,7 @@
 // Dữ liệu: tương tác từng bài trên Facebook + tỉ lệ anh duyệt/huỷ bản nháp theo từng nguồn (agent, kế hoạch, video, anh gửi).
 import { claude, modelFor } from "./claude.js";
 import { trendNotes } from "./trends.js";
+import { strategyCouncil, PERSONAS } from "./council.js";
 
 const VN = 7 * 3600e3;
 export const DEFAULT_STRATEGY = {
@@ -9,7 +10,7 @@ export const DEFAULT_STRATEGY = {
   best_slots: ["07:30", "11:45", "20:00"],
   agent_min_score: 6, agent_max_per_scan: 2, video_per_day: 1,
   weekly_targets: { fb_posts: 7, videos: 5 },
-  content_notes: "", preferred_styles: [],
+  content_notes: "", format_notes: "", preferred_styles: [],
 };
 
 // Ghi nguồn gốc mỗi bản nháp để cuối tuần đo tỉ lệ duyệt
@@ -42,7 +43,7 @@ export async function withStrategy(env, kvGet) {
     AGENT_MIN_SCORE: String(s.agent_min_score ?? env.AGENT_MIN_SCORE ?? 6),
     AGENT_MAX_PER_SCAN: String(s.agent_max_per_scan ?? env.AGENT_MAX_PER_SCAN ?? 2),
     VIDEO_ENABLED: s.video_per_day === 0 ? "0" : env.VIDEO_ENABLED,
-    STRATEGY_NOTES: [s.content_notes, s.preferred_styles?.length ? `Mẫu poster đang được tương tác tốt: ${s.preferred_styles.join(", ")}` : ""].filter(Boolean).join(". "),
+    STRATEGY_NOTES: [s.content_notes, s.format_notes ? `Hình thức/cách dựng: ${s.format_notes}` : "", s.preferred_styles?.length ? `Mẫu poster đang được tương tác tốt: ${s.preferred_styles.join(", ")}` : ""].filter(Boolean).join(". "),
     STRATEGY_MIX: JSON.stringify(s.pillar_mix || DEFAULT_STRATEGY.pillar_mix),
   };
 }
@@ -66,8 +67,9 @@ const TOOL = {
       video_per_day: { type: "integer", minimum: 0, maximum: 1 },
       weekly_targets: { type: "object", properties: { fb_posts: { type: "integer" }, videos: { type: "integer" } }, required: ["fb_posts", "videos"] },
       content_notes: { type: "string", description: "Chỉ dẫn ngắn cho người viết tuần tới (≤ 300 ký tự): dạng tiêu đề, chủ đề, độ dài nên ưu tiên" },
+      format_notes: { type: "string", description: "Hình thức thể hiện tuần tới (≤ 250 ký tự): kiểu câu mở video, cách dựng poster/video, định dạng đang bắt xu hướng" },
     },
-    required: ["evaluation", "what_worked", "what_to_change", "pillar_mix", "best_slots", "preferred_styles", "agent_min_score", "agent_max_per_scan", "video_per_day", "weekly_targets", "content_notes"],
+    required: ["evaluation", "what_worked", "what_to_change", "pillar_mix", "best_slots", "preferred_styles", "agent_min_score", "agent_max_per_scan", "video_per_day", "weekly_targets", "content_notes", "format_notes"],
   },
 };
 
@@ -79,9 +81,9 @@ export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta, 
   for (const j of jobs) {
     const m = JSON.parse((await kvGet(env, `meta:${j.id}`)) || "{}");
     const src = m.source || "manual";
-    const b = (bySource[src] ||= { drafts: 0, published: 0, cancelled: 0 });
+    const b = (bySource[src] ||= { drafts: 0, published: 0, cancelled: 0, auto: 0, panel: [] });
     if (j.status === "collecting") continue;
-    b.drafts++; if (m.published || j.status === "published") b.published++; if (j.status === "cancelled") b.cancelled++;
+    b.drafts++; if (m.auto_published) b.auto++; if (m.panel_score) b.panel.push(m.panel_score); if (m.published || j.status === "published") b.published++; if (j.status === "cancelled") b.cancelled++;
   }
   const enriched = [];
   for (const r of rows) {
@@ -96,7 +98,8 @@ export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta, 
     kenh_khac: channels,
     chi_tieu_tuan_qua: prev.weekly_targets,
     bai_fb_tuan_qua: enriched.map((r) => ({ tieu_de: r.title, diem: r.score, cam_xuc: r.re, binh_luan: r.co, chia_se: r.sh, gio: r.hourVN, nguon: r.source, tru_cot: r.pillar, mau: r.style })),
-    ban_nhap_theo_nguon: bySource,
+    ban_nhap_theo_nguon: Object.fromEntries(Object.entries(bySource).map(([k, v]) => [k, { ...v, panel: undefined, diem_hoi_dong_tb: v.panel.length ? +(v.panel.reduce((a, x) => a + x, 0) / v.panel.length).toFixed(1) : null }])),
+    xu_huong_tuan: env.TREND_NOTES || "",
     chien_luoc_dang_ap_dung: prev,
   };
   const msg = await claude(env, {
@@ -107,8 +110,23 @@ export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta, 
     tools: [TOOL], tool_choice: { type: "tool", name: "weekly_strategy" },
     messages: [{ role: "user", content: JSON.stringify(data) }],
   });
-  const st = msg.content.find((b) => b.type === "tool_use")?.input;
+  let st = msg.content.find((b) => b.type === "tool_use")?.input;
   if (!st) return "";
+  // Hội đồng chiến lược phản biện → Trưởng nhóm tăng trưởng chốt bản cuối
+  let councilLines = "";
+  if (env.COUNCIL_ENABLED !== "0") {
+    try {
+      const fb = await strategyCouncil(env, data, st);
+      if (fb.length) {
+        councilLines = fb.map((r) => `${PERSONAS[r.key].icon} ${PERSONAS[r.key].name} ${r.agree ? "đồng ý" : "góp ý"}: ${[...r.comments, ...r.format_ideas].slice(0, 3).join("; ")}`).join("\n");
+        const fin = await claude(env, { model: modelFor(env, "fast"), max_tokens: 2500,
+          system: "Bạn là trưởng nhóm tăng trưởng fanpage THT Audit. Đã có đề xuất chiến lược và ý kiến phản biện của hội đồng (người đọc, giám đốc DN khách hàng, chuyên gia tăng trưởng). Cân nhắc và chốt bản chiến lược cuối – tiếp thu góp ý hợp lý, bác bỏ góp ý không có căn cứ số liệu. Gọi weekly_strategy đúng một lần.",
+          tools: [TOOL], tool_choice: { type: "tool", name: "weekly_strategy" },
+          messages: [{ role: "user", content: JSON.stringify({ so_lieu: data, de_xuat: st, y_kien_hoi_dong: fb }) }] });
+        st = fin.content.find((b) => b.type === "tool_use")?.input || st;
+      }
+    } catch (_) {}
+  }
   const { evaluation, what_worked, what_to_change, ...strategy } = st;
   await kvSet(env, "growth:strategy", JSON.stringify(strategy));
   await kvSet(env, "growth:learnings", [...(what_worked || []).map((x) => `+ ${x}`), ...(what_to_change || []).map((x) => `→ ${x}`), strategy.content_notes].filter(Boolean).join("\n"));
@@ -116,11 +134,12 @@ export async function weeklyReview(env, kvGet, kvSet, { rows, followers, delta, 
   const draftLine = Object.entries(bySource).map(([k, v]) => `${{ agent: "agent", plan: "kế hoạch", video: "video", manual: "anh gửi" }[k] || k} ${v.published}/${v.drafts} duyệt`).join(" · ");
   return [
     `\n🧠 Em tự đánh giá tuần qua:\n${evaluation}`,
+    councilLines ? `🗣 Hội đồng bàn bạc:\n${councilLines}` : "",
     draftLine ? `📝 Bản nháp: ${draftLine}` : "",
     what_worked?.length ? `✅ Hiệu quả:\n${what_worked.map((x) => `• ${x}`).join("\n")}` : "",
     what_to_change?.length ? `🔧 Cần đổi:\n${what_to_change.map((x) => `• ${x}`).join("\n")}` : "",
     `📈 Em tự điều chỉnh cho tuần tới:\n• Giờ vàng: ${strategy.best_slots.join(", ")}\n• Kế hoạch 7 bài: ${mix.hot} tin nóng, ${mix.qa} giải đáp, ${mix.cal} lịch thuế, ${mix.err} sai lầm thường gặp, ${mix.tool} công cụ\n` +
       `• Agent: chỉ soạn tin từ ${strategy.agent_min_score}/10, tối đa ${strategy.agent_max_per_scan} tin/lần quét · video ${strategy.video_per_day ? "1/ngày" : "tạm dừng"}\n` +
-      `• Chỉ tiêu: ${strategy.weekly_targets.fb_posts} bài Facebook, ${strategy.weekly_targets.videos} video${strategy.preferred_styles?.length ? `\n• Ưu tiên mẫu: ${strategy.preferred_styles.join(", ")}` : ""}`,
+      `• Chỉ tiêu: ${strategy.weekly_targets.fb_posts} bài Facebook, ${strategy.weekly_targets.videos} video${strategy.preferred_styles?.length ? `\n• Ưu tiên mẫu: ${strategy.preferred_styles.join(", ")}` : ""}${strategy.format_notes ? `\n• Hình thức: ${strategy.format_notes}` : ""}`,
   ].filter(Boolean).join("\n\n");
 }

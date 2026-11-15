@@ -11,7 +11,7 @@ export const KNOWN_AGENTS = {
       { id: "scout", label: "Dò tin & video" }, { id: "pick", label: "Chọn bài" }, { id: "draft", label: "Soạn nháp" },
       { id: "editor", label: "Tổng biên tập" }, { id: "render", label: "Dựng poster" }, { id: "review", label: "Chờ duyệt" },
       { id: "publish", label: "Đăng bài" }, { id: "video", label: "Dựng video" }, { id: "weekly", label: "Tự đánh giá tuần" },
-      { id: "trend", label: "Nghiên cứu xu hướng" },
+      { id: "trend", label: "Nghiên cứu xu hướng" }, { id: "council", label: "Hội đồng đánh giá" }, { id: "audit", label: "Kiểm tra sau đăng" },
     ],
   },
 };
