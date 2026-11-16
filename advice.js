@@ -259,7 +259,7 @@ async function pushToMyTHT(env, letter, pdf) {
   const res = await call(url, {
     method: "POST", headers: { "content-type": "application/json", "x-tht-key": env.MYTHT_KEY },
     body: JSON.stringify({
-      id: letter.id, kind: letterKind(letter), number: letter.number, subject: letter.subject, question: letter.question || "",
+      id: letter.id, number: letter.number, subject: letter.subject, question: letter.question || "",
       created_at: letter.created_at, approved_at: letter.approved_at,
       conclusion: letter.data?.conclusion || "", legal_basis: letter.data?.legal_basis || [], recommendations: letter.data?.recommendations || [],
       email: emailTemplate(letter),
