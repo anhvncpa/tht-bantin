@@ -28,7 +28,7 @@ export default {
         return new Response("ok");
       }
       if (url.pathname === "/tg/setup") return await setupWebhook(url, env);
-      if (url.pathname.startsWith("/tiktok/")) return await tiktokRoutes(url, env);
+      if (url.pathname.startsWith("/tiktok/")) return await tiktokRoutes(url, env, request);
       if (url.pathname.startsWith("/m/")) return await serveMedia(url, env);
       if (url.pathname.startsWith("/threads/")) return await threadsRoutes(url, env, kvGet, kvSet);
       if (url.pathname.startsWith("/hub/api/letters")) return await letterRoutes(request, env, url);

@@ -21,6 +21,7 @@ import { councilReview, panelText, verifyUncertain } from "./council.js";
 import { posterQA, qaText, crossCheck, adviceFacts, mismatchesToUncertain } from "./gemini.js";
 import { pageToken } from "./facebook.js";
 import { threadsToken } from "./social.js";
+import { tiktokPostRoutes, tiktokPostUrl, tiktokAudited } from "./tiktokpost.js";
 
 // Kênh đăng: "all" = bài ảnh/chữ, "allv" = kèm các kênh video (dựng trên GitHub Actions)
 const POST_TARGETS = (env) => list(env.POST_TARGETS || "fb,story,ig,threads");
@@ -172,6 +173,11 @@ export async function handleUpdate(update, env) {
     if (!q) { await kvSet(env, askKey(chat, uid), "1"); return send(env, chat, "Anh nhắn vấn đề cần tư vấn (vd: “Cá nhân cho thuê nhà 150 triệu/năm phải nộp thuế gì?”)."); }
     await send(env, chat, `🔎 Em đang tra cứu nguồn chính thức cho vấn đề:\n“${q}”\n(2–4 phút, xong em gửi tóm tắt để anh chọn Thư tư vấn / Poster)`);
     return env.JOBS.send({ type: "advise", chat, q });
+  }
+  if (cmd === "/tiktokpage") {
+    const rows = (await env.DB.prepare("SELECT id FROM jobs WHERE chat_id = ? AND content IS NOT NULL ORDER BY updated_at DESC LIMIT 10").bind(chat).all()).results || [];
+    for (const r of rows) if (await env.FILES.head(`jobs/${r.id}/story.mp4`)) return sendTikTokLink(env, await getJob(env, r.id));
+    return send(env, chat, "Chưa có bài nào đã dựng video.");
   }
   if (cmd === "/danglai") {
     const r = await env.DB.prepare("SELECT id FROM jobs WHERE chat_id = ? AND content IS NOT NULL AND render IS NOT NULL AND status IN ('published','review','scheduled') ORDER BY updated_at DESC LIMIT 1").bind(chat).first();
@@ -527,9 +533,16 @@ async function publish(env, job, targets) {
     }
   }
   const video = targets.filter((t) => VIDEO_KINDS.includes(t));
-  if (video.length) {
+  let dispatch = video;
+  if (video.includes("tiktok") && !dry && env.TIKTOK_FLOW !== "inbox" && (env.TIKTOK_FLOW === "page" || (await tiktokAudited(env, ttDeps(env))))) {
+    dispatch = video.filter((t) => t !== "tiktok");
+    await kvSet(env, `ttpage:${job.id}`, "1");
+    if (!dispatch.length && (await env.FILES.head(`jobs/${job.id}/story.mp4`))) { await kvDel(env, `ttpage:${job.id}`); await sendTikTokLink(env, job); dispatch = null; }   // chỉ đăng lại TikTok, video đã có
+    else if (!dispatch.length) dispatch = ["build"];
+  }
+  if (dispatch?.length) {
     try {
-      await dispatchVideo(env, job.id, video);
+      await dispatchVideo(env, job.id, dispatch);
       out.push(`🎬 Đang dựng video có nhạc cho: ${video.join(", ")} (2–4 phút), xong em báo.`);
     } catch (e) { out.push(`🎬 Không khởi động được luồng video: ${e.message}`); }
   }
@@ -539,7 +552,8 @@ async function publish(env, job, targets) {
   if (postLines.length) await hubEvent(env, { run: job.id, step: "publish", status: postLines.some((x) => /lỗi/i.test(x)) ? "error" : "done", title: postLines.join(" · ").slice(0, 280), detail: postLines.join("\n") });
   const vLine = out.find((x) => x.startsWith("🎬"));
   if (vLine) await hubEvent(env, { run: job.id, step: "video", status: /Không khởi động/.test(vLine) ? "error" : "start", title: vLine });
-  await send(env, job.chat_id, compactPublish(out, video, dry), { parse_mode: "HTML", ...retryKb(job.id, out) });
+  const summary = compactPublish(out, video, dry);
+  if (summary) await send(env, job.chat_id, summary, { parse_mode: "HTML", ...retryKb(job.id, out) });
   if (!dry) await kvSet(env, `audit:${job.id}`, JSON.stringify({ at: Date.now(), lines: out, video: video.length ? video : [], vres: null }));
 }
 
@@ -641,6 +655,8 @@ export async function internal(request, env, url) {
     const job = await getJob(env, id);
     if (job) {
       await hubEvent(env, { run: job.id, step: "video", status: results.some((r) => /lỗi/i.test(r)) ? "error" : "done", title: (results.join(" · ") || "Luồng video đã chạy xong").slice(0, 280), detail: results.join("\n") });
+      const secs = (results.join("\n").match(/🎬 Video[^\n]*?(\d+)s/) || [])[1];
+      if (secs) await kvSet(env, `vdur:${id}`, secs);
       const vobj = await env.FILES.get(`jobs/${id}/story.mp4`);
       const capt = compactVideo(results);
       const r = vobj ? await sendVideo(env, job.chat_id, new Uint8Array(await vobj.arrayBuffer()), capt, { parse_mode: "HTML", ...retryKb(job.id, results) }) : null;
@@ -648,6 +664,7 @@ export async function internal(request, env, url) {
       const au = JSON.parse((await kvGet(env, `audit:${id}`)) || "null");
       if (au) { au.vres = results; await kvSet(env, `audit:${id}`, JSON.stringify(au)); }
       // TikTok (hộp thư) không nhận nội dung qua API → gửi riêng caption dạng chạm-để-copy để dán khi bấm Đăng trong app
+      if (await kvGet(env, `ttpage:${id}`)) { await kvDel(env, `ttpage:${id}`); await sendTikTokLink(env, job); }
       const cap = job.content?.tiktok_caption;
       if (cap && results.some((r) => r.startsWith("🎵 TikTok:") && r.includes("hộp thư")))
         await send(env, job.chat_id, `<code>${escHtml(cap.slice(0, 2000))}</code>`, { parse_mode: "HTML" });
@@ -659,7 +676,16 @@ export async function internal(request, env, url) {
 }
 
 // ---------------- TikTok OAuth (token kept in D1, refreshed here) ----------------
-export async function tiktokRoutes(url, env) {
+const ttDeps = (env) => ({ token: () => tiktokAccessToken(env), getJob, kvGet, kvSet, mediaUrl,
+  notify: (job, text) => send(env, job.chat_id, `${text}: ${job.content?.title_line1 || job.id}`) });
+// Nút mở trang "Đăng lên TikTok" (người dùng tự chọn quyền xem + đồng ý, theo quy định TikTok)
+async function sendTikTokLink(env, job) {
+  const u = await tiktokPostUrl(env, job.id);
+  return send(env, job.chat_id, "🎵 TikTok: mở trang, chọn “Mọi người”, bấm Đăng", { reply_markup: { inline_keyboard: [[{ text: "🎵 Đăng lên TikTok", url: u }]] } });
+}
+
+export async function tiktokRoutes(url, env, request) {
+  if (/^\/tiktok\/(post|api)\//.test(url.pathname)) return (await tiktokPostRoutes(request, url, env, ttDeps(env))) || new Response("not found", { status: 404 });
   const redirect = `${env.PUBLIC_BASE_URL}/tiktok/callback`;
   if (url.pathname === "/tiktok/login") {
     if (url.searchParams.get("key") !== env.APP_PASSWORD) return new Response("Sai mật khẩu", { status: 403 });
