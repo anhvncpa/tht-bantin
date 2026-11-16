@@ -687,12 +687,22 @@ async function sendTikTokLink(env, job) {
 export async function tiktokRoutes(url, env, request) {
   if (/^\/tiktok\/(post|api)\//.test(url.pathname)) return (await tiktokPostRoutes(request, url, env, ttDeps(env))) || new Response("not found", { status: 404 });
   const redirect = `${env.PUBLIC_BASE_URL}/tiktok/callback`;
+  const authorize = async (jobId) => {
+    const state = crypto.randomUUID() + (jobId ? "." + jobId : "");
+    await kvSet(env, "tiktok_state", state);
+    const q = new URLSearchParams({ client_key: String(env.TIKTOK_CLIENT_KEY || "").trim(), scope: env.TIKTOK_MODE === "inbox" ? "user.info.basic,video.upload" : "user.info.basic,video.publish,video.upload", response_type: "code", redirect_uri: redirect, state });
+    return Response.redirect(`https://www.tiktok.com/v2/auth/authorize/?${q}`, 302);
+  };
   if (url.pathname === "/tiktok/login") {
     if (url.searchParams.get("key") !== env.APP_PASSWORD) return new Response("Sai mật khẩu", { status: 403 });
-    const state = crypto.randomUUID();
-    await kvSet(env, "tiktok_state", state);
-    const q = new URLSearchParams({ client_key: String(env.TIKTOK_CLIENT_KEY || "").trim(), scope: env.TIKTOK_MODE === "direct" ? "user.info.basic,video.publish,video.upload" : "user.info.basic,video.upload", response_type: "code", redirect_uri: redirect, state });
-    return Response.redirect(`https://www.tiktok.com/v2/auth/authorize/?${q}`, 302);
+    return authorize();
+  }
+  // Nút "Kết nối tài khoản TikTok" trên trang đăng (link có chữ ký, không cần mật khẩu) → xong quay lại trang đăng
+  const cm = url.pathname.match(/^\/tiktok\/connect\/([A-Za-z0-9-]{4,40})$/);
+  if (cm) {
+    const ok = (await tiktokPostUrl(env, cm[1])).endsWith(`s=${url.searchParams.get("s")}`);
+    if (!ok) return new Response("Link không hợp lệ", { status: 403 });
+    return authorize(cm[1]);
   }
   if (url.pathname === "/tiktok/callback") {
     if (url.searchParams.get("state") !== (await kvGet(env, "tiktok_state"))) return new Response("Phiên đăng nhập không hợp lệ", { status: 400 });
@@ -701,6 +711,9 @@ export async function tiktokRoutes(url, env, request) {
     const tok = await res.json();
     if (!tok.access_token) return new Response(`TikTok không cấp token: ${JSON.stringify(tok)}`, { status: 400 });
     await kvSet(env, "tiktok_token", JSON.stringify({ ...tok, obtained_at: Date.now() }));
+    await kvDel(env, "tt:audited");
+    const back = (url.searchParams.get("state") || "").split(".")[1];
+    if (back) return Response.redirect(`${await tiktokPostUrl(env, back)}&connected=1`, 302);
     return new Response("Đã kết nối TikTok cho bot THT. Có thể đóng trang này.", { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
   return new Response("not found", { status: 404 });

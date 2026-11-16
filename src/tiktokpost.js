@@ -122,12 +122,14 @@ textarea{min-height:130px}
 button{width:100%;padding:14px;font-size:16px;font-weight:bold;border:0;border-radius:12px;background:var(--ink);color:#fff}
 button:disabled{background:#9CA3AF}
 .st{text-align:center;padding:14px;font-size:15px}.ok{color:var(--green)}.bad{color:var(--red)}
+.cbtn{flex:none;text-align:center;font-size:13px;font-weight:bold;color:#fff;background:#FE2C55;border-radius:10px;padding:8px 12px;text-decoration:none;line-height:1.2}.cbtn small{font-weight:normal;opacity:.9}
 .brand{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin-bottom:8px}.brand i{width:10px;height:10px;background:var(--gold);display:inline-block}
 </style></head><body><div class="wrap">
 <div class="brand"><i></i>THT Audit · Content publisher</div>
 <h1>Đăng lên TikTok <span class="sub">· Post to TikTok</span></h1>
-<div class="card"><div class="acct"><img id="av" alt=""><div><b id="nick">Đang tải tài khoản… · Loading account…</b><span class="sub" id="uname"></span></div></div>
-<div id="cerr" class="hint warn"></div></div>
+<div class="card"><div class="acct"><img id="av" alt=""><div style="flex:1"><b id="nick">Đang tải tài khoản… · Loading account…</b><span class="sub" id="uname"></span></div>
+<a class="cbtn" href="/tiktok/connect/${esc(id)}?s=${esc(s)}">Kết nối TikTok<br><small>Connect account</small></a></div>
+<div id="conn" class="hint ok"></div><div id="cerr" class="hint warn"></div></div>
 <div class="card"><div class="sub" style="margin-bottom:8px">${esc(heading)}</div>
 ${video ? `<video src="${esc(video)}" controls playsinline preload="metadata"></video>` : `<div class="hint warn">Video chưa dựng xong · Video is not ready yet</div>`}
 <div class="hint" id="durhint"></div>
@@ -203,6 +205,7 @@ $("go").onclick=async()=>{
   }catch(e){ $("st").innerHTML='<span class="bad">❌ '+e.message+'</span>'; busy=false; validate(); }
 };
 ["priv","disc","own","bc"].forEach(x=>$(x).addEventListener("change",validate));
+if(new URLSearchParams(location.search).get("connected")) $("conn").textContent="✅ Đã kết nối tài khoản TikTok · TikTok account connected";
 load();
 </script></body></html>`;
 }
