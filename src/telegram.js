@@ -50,8 +50,9 @@ export async function sendDocument(env, chat_id, bytes, name, mime, caption) {
   return tgForm(env, "sendDocument", form);
 }
 
-export async function sendVideo(env, chat_id, bytes, caption) {
+export async function sendVideo(env, chat_id, bytes, caption, extra = {}) {
   const form = new FormData();
+  for (const [k, v] of Object.entries(extra)) form.append(k, typeof v === "string" ? v : JSON.stringify(v));
   form.append("chat_id", String(chat_id));
   form.append("video", new Blob([bytes], { type: "video/mp4" }), "story.mp4");
   form.append("supports_streaming", "true");

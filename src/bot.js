@@ -84,8 +84,13 @@ const styleKb = (id) => keyboard([
 const pagesKb = (id) => keyboard([
   [["Tự động", `pg:${id}:auto`], ["1 trang", `pg:${id}:1`], ["2 trang", `pg:${id}:2`], ["3 trang", `pg:${id}:3`]],
 ]);
+// Bàn phím gọn khi gửi bản xem trước; "⋯ Thêm" mở bàn phím đầy đủ (không huỷ tự đăng)
+const reviewKbShort = (id) => keyboard([
+  [["✅ Duyệt – đăng tất cả", `pub:${id}:allv`]],
+  [["✏️ Sửa", `ed:${id}`], ["⏰ Hẹn giờ", `sh:${id}`], ["❌ Huỷ", `x:${id}`], ["⋯ Thêm", `more:${id}`]],
+]);
 const reviewKb = (id, video = true) => keyboard([
-  [[video ? "✅ Đăng 5 kênh (+video)" : "✅ Đăng ngay", `pub:${id}:${video ? "allv" : "all"}`], ["⏰ Hẹn giờ", `sh:${id}`], ["✉️ Thư", `lm:${id}`], ["🌐 VI⇄EN", `bi:${id}`]],
+  [["✅ Duyệt – đăng tất cả", `pub:${id}:allv`], ["⏰ Hẹn giờ", `sh:${id}`], ["✉️ Thư", `lm:${id}`], ["🌐 VI⇄EN", `bi:${id}`]],
   [["📘 FB", `pub:${id}:fb`], ["📱 Story", `pub:${id}:story`], ["📸 Instagram", `pub:${id}:ig`], ["🧵 Threads", `pub:${id}:threads`]],
   [["🎵 TikTok", `pub:${id}:tiktok`], ["▶️ YouTube", `pub:${id}:youtube`], ["🎞 FB Reels", `pub:${id}:reels`], ["🎞 IG Reels", `pub:${id}:igreels`]],
   [["✏️ Sửa", `ed:${id}`], ["🎨 Mẫu", `rs:${id}`], ["🧠 Soạn kỹ", `hq:${id}`], ["❌ Huỷ", `x:${id}`]],
@@ -271,6 +276,11 @@ async function onButton(q, env) {
   if (act === "sg") {
     await kvSet(env, "growth:strategy_off", arg === "off" ? "1" : "0");
     return send(env, chat, arg === "off" ? "↩️ Đã tạm không áp dụng điều chỉnh tự động, bot chạy theo cấu hình gốc. Bật lại: bấm nút ✅ ở báo cáo tuần." : "✅ Đã bật lại điều chỉnh tự động theo tự đánh giá tuần.");
+  }
+  if (act === "more" || act === "less") {
+    const kb = act === "more" ? reviewKb(id) : reviewKbShort(id);
+    if (act === "more") kb.reply_markup.inline_keyboard.push([{ text: "‹ Thu gọn", callback_data: `less:${id}` }]);
+    return tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: q.message.message_id, ...kb });
   }
   const job = await getJob(env, id);
   if (!job) return send(env, chat, "Bài này không còn, gửi file để làm bài mới.");
@@ -462,18 +472,20 @@ async function renderAndPreview(env, job, lookupRows = 0) {
   const images = [];
   for (const [i, k] of job.render.pages.entries()) images.push({ name: `trang${i + 1}.png`, bytes: new Uint8Array(await (await env.FILES.get(k)).arrayBuffer()) });
   const c = job.content;
-  await sendAlbum(env, job.chat_id, images, `Bản xem trước · mẫu ${job.style} – ${STYLE_NAMES[job.style]}${c.style === job.style && c.style_reason ? ` (em chọn vì: ${c.style_reason})` : ""} · ${images.length} trang`);
-  const notes = [];
-  if (c.corrections?.length) notes.push("⚠️ Đã chỉnh so với nguồn:\n" + c.corrections.map((x) => `• ${x}`).join("\n"));
-  if (c.panel) notes.push(panelText(c.panel));
-  if (c.qa) notes.push(qaText(c.qa) + (c.qa_fixed ? "\n(đã tự sửa và dựng lại 1 lần)" : ""));
-  if (c.uncertain?.length) notes.push("❓ Còn cần anh kiểm tra (em chưa tự xác nhận được):\n" + c.uncertain.map((x) => `• ${x}`).join("\n"));
-  if (lookupRows) notes.push(`🔎 Trang tra cứu ${lookupRows.toLocaleString("vi-VN")} dòng: ${job.qr_url} (mã QR trỏ tới đây)`);
-  if (notes.length) await send(env, job.chat_id, notes.join("\n\n"));
-  await send(env, job.chat_id, "📘 Bài Facebook (chuẩn SEO):\n\n" + fbCaption(c, env));
-  await send(env, job.chat_id,
-    `▶️ YouTube: ${c.youtube_title}\n🎵 TikTok/Story mở đầu: “${c.story_hook}”\n🔑 Từ khoá: ${(c.seo_keywords || []).join(", ")}\n\n` +
-    `Duyệt và chọn nơi đăng${env.DRY_RUN === "1" ? " (CHẾ ĐỘ THỬ – không đăng thật)" : ""}:${await armAutoPublish(env, job)}`, reviewKb(job.id, await wantsVideo(env, job.id)));
+  const title = [c.title_line1, c.title_line2].filter(Boolean).join(" ");
+  await sendAlbum(env, job.chat_id, images, `📰 ${title} · mẫu ${job.style} – ${STYLE_NAMES[job.style]}`);
+  const qaN = (c.qa?.issues || []).length;
+  const head = [
+    `<b>📰 ${escHtml(title)}</b>${env.DRY_RUN === "1" ? " <i>(chế độ thử)</i>" : ""}`,
+    [c.panel ? `⭐ Hội đồng ${c.panel.score}/10` : "", c.qa ? (qaN ? `🖼 Poster ${qaN} lỗi` : "🖼 Poster OK") : "", c.panel?.edits || c.qa_fixed ? "✏️ đã tự sửa" : ""].filter(Boolean).join(" · "),
+    c.uncertain?.length ? "❓ <b>Cần anh xem:</b>\n" + c.uncertain.slice(0, 3).map((x) => `• ${escHtml(String(x).slice(0, 160))}`).join("\n") : "",
+    lookupRows ? `🔎 Trang tra cứu ${lookupRows.toLocaleString("vi-VN")} dòng: ${escHtml(job.qr_url)}` : "",
+  ].filter(Boolean).join("\n");
+  const details = [c.corrections?.length ? "Đã chỉnh so với nguồn:\n" + c.corrections.map((x) => `• ${x}`).join("\n") : "", c.panel ? panelText(c.panel) : "", c.qa ? qaText(c.qa) : ""].filter(Boolean).join("\n\n");
+  const card = `${head}\n\n<blockquote expandable>📘 Bài Facebook\n${escHtml(fbCaption(c, env).slice(0, 2000))}</blockquote>` +
+    (details ? `\n<blockquote expandable>🔎 Chi tiết kiểm tra\n${escHtml(details.slice(0, 1100))}</blockquote>` : "") +
+    escHtml(await armAutoPublish(env, job));
+  await send(env, job.chat_id, card, { parse_mode: "HTML", ...reviewKbShort(job.id) });
   await hubEvent(env, { run: job.id, step: "review", status: "waiting", title: "Đã gửi bản xem trước vào Telegram – chờ anh duyệt" });
 }
 
@@ -527,8 +539,51 @@ async function publish(env, job, targets) {
   if (postLines.length) await hubEvent(env, { run: job.id, step: "publish", status: postLines.some((x) => /lỗi/i.test(x)) ? "error" : "done", title: postLines.join(" · ").slice(0, 280), detail: postLines.join("\n") });
   const vLine = out.find((x) => x.startsWith("🎬"));
   if (vLine) await hubEvent(env, { run: job.id, step: "video", status: /Không khởi động/.test(vLine) ? "error" : "start", title: vLine });
-  await send(env, job.chat_id, out.join("\n"), retryKb(job.id, out));
+  await send(env, job.chat_id, compactPublish(out, video, dry), { parse_mode: "HTML", ...retryKb(job.id, out) });
   if (!dry) await kvSet(env, `audit:${job.id}`, JSON.stringify({ at: Date.now(), lines: out, video: video.length ? video : [], vres: null }));
+}
+
+const escHtml = (t) => String(t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const VNAME = { story: "Story", tiktok: "TikTok", youtube: "YouTube", reels: "FB Reels", igreels: "IG Reels" };
+// Gộp kết quả từng kênh thành 1 dòng: ✅ kênh (có link) · ❌ kênh lỗi (lý do ngắn)
+function channelLines(lines) {
+  const ok = [], bad = [], note = [];
+  for (const l of lines) {
+    const m = l.match(/^(\S+)\s+(.+?)( lỗi)?(?: \(chia sẻ video\))?: (.*)$/s);
+    if (!m) continue;
+    const name = m[2], msg = m[4], url = (msg.match(/https?:\/\/\S+/) || [""])[0];
+    if (m[3]) bad.push(`❌ ${escHtml(name)}: ${escHtml(msg.replace(/\{.*\}/s, "").slice(0, 110))}`);
+    else if (/bỏ qua|chế độ thử/.test(msg)) note.push(`${escHtml(name)}: ${escHtml(msg.slice(0, 80))}`);
+    else ok.push(url ? `<a href="${escHtml(url)}">${escHtml(name)}</a>` : escHtml(name));
+  }
+  return { ok, bad, note };
+}
+function compactPublish(out, video, dry) {
+  const { ok, bad, note } = channelLines(out.filter((x) => /^(📘|📸|🧵)/.test(x)));
+  const v = out.find((x) => x.startsWith("🎬"));
+  return [
+    ok.length ? `✅ Đã đăng: ${ok.join(" · ")}` : "",
+    ...bad, note.length ? `ℹ️ ${note.join(" · ")}` : "",
+    v ? (/Không khởi động/.test(v) ? `❌ Video: ${escHtml(v.split(": ").slice(1).join(": ").slice(0, 140))}` : `🎬 Đang dựng video ${video.map((t) => VNAME[t] || t).join(", ")} (3–4 phút)…`) : "",
+    dry ? "<i>(chế độ thử – chưa đăng thật)</i>" : "",
+  ].filter(Boolean).join("\n");
+}
+// Kết quả luồng video (từ GitHub) → chú thích ngắn dưới video
+function compactVideo(results) {
+  const lines = results.flatMap((r) => String(r).split("\n"));
+  const head = lines.find((l) => l.startsWith("🎬 Video")) || "";
+  const secs = (head.match(/(\d+)s/) || [])[1], poster = /lướt poster/.test(head);
+  const voice = (lines.find((l) => l.startsWith("🎙")) || "").replace(/^🎙 Giọng đọc: /, "").replace(/^Gemini .*\((.+)\)$/, "giọng $1").replace(/^Edge (.+)$/, "giọng $1");
+  const { ok, bad } = channelLines(lines.filter((l) => /^(📱|🎵|▶️|🎞)/.test(l) && !/hộp thư/.test(l)));
+  const inbox = lines.some((l) => l.startsWith("🎵 TikTok:") && l.includes("hộp thư"));
+  const yPriv = lines.some((l) => l.startsWith("▶️ YouTube:") && /private/.test(l));
+  const warn = lines.filter((l) => l.startsWith("⚠️")).map((l) => escHtml(l.slice(0, 120)));
+  return [
+    `🎬 Video${secs ? ` ${secs}s` : ""}${poster ? " (kiểu lướt poster)" : ""}${voice ? ` · 🎙 ${escHtml(voice)}` : ""}`,
+    ok.length ? `✅ ${ok.join(" · ")}${yPriv ? " <i>(YouTube đang riêng tư)</i>" : ""}` : "",
+    inbox ? "🎵 TikTok: đã vào hộp thư – mở app, dán mô tả bên dưới, bấm Đăng" : "",
+    ...bad, ...warn, lines.some((l) => /Chế độ thử/.test(l)) ? "<i>(chế độ thử – chưa đăng)</i>" : "",
+  ].filter(Boolean).join("\n");
 }
 
 async function dispatchVideo(env, jobId, targets) {
@@ -579,7 +634,6 @@ export async function internal(request, env, url) {
     const job = await getJob(env, id);
     const bytes = new Uint8Array(await request.arrayBuffer());
     await env.FILES.put(`jobs/${id}/story.mp4`, bytes, { httpMetadata: { contentType: "video/mp4" } });
-    if (job) await sendVideo(env, job.chat_id, bytes, "🎬 Video story/Shorts đã dựng xong");
     return Response.json({ ok: true });
   }
   if (what === "notify" && request.method === "POST") {
@@ -587,16 +641,16 @@ export async function internal(request, env, url) {
     const job = await getJob(env, id);
     if (job) {
       await hubEvent(env, { run: job.id, step: "video", status: results.some((r) => /lỗi/i.test(r)) ? "error" : "done", title: (results.join(" · ") || "Luồng video đã chạy xong").slice(0, 280), detail: results.join("\n") });
-      await send(env, job.chat_id, results.join("\n") || "Luồng video đã chạy xong.", retryKb(job.id, results));
+      const vobj = await env.FILES.get(`jobs/${id}/story.mp4`);
+      const capt = compactVideo(results);
+      const r = vobj ? await sendVideo(env, job.chat_id, new Uint8Array(await vobj.arrayBuffer()), capt, { parse_mode: "HTML", ...retryKb(job.id, results) }) : null;
+      if (!r?.ok) await send(env, job.chat_id, capt, { parse_mode: "HTML", ...retryKb(job.id, results) });
       const au = JSON.parse((await kvGet(env, `audit:${id}`)) || "null");
       if (au) { au.vres = results; await kvSet(env, `audit:${id}`, JSON.stringify(au)); }
       // TikTok (hộp thư) không nhận nội dung qua API → gửi riêng caption dạng chạm-để-copy để dán khi bấm Đăng trong app
       const cap = job.content?.tiktok_caption;
-      if (cap && results.some((r) => r.startsWith("🎵 TikTok:") && r.includes("hộp thư"))) {
-        const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        await send(env, job.chat_id, "📋 Nội dung đăng TikTok – chạm vào khung dưới để copy, rồi dán vào ô mô tả khi bấm Đăng:");
-        await send(env, job.chat_id, `<code>${esc(cap.slice(0, 3800))}</code>`, { parse_mode: "HTML" });
-      }
+      if (cap && results.some((r) => r.startsWith("🎵 TikTok:") && r.includes("hộp thư")))
+        await send(env, job.chat_id, `<code>${escHtml(cap.slice(0, 2000))}</code>`, { parse_mode: "HTML" });
     }
     return Response.json({ ok: true });
   }
@@ -847,11 +901,11 @@ async function armAutoPublish(env, job) {
   if (!list(env.AUTO_PUBLISH_SOURCES || "agent,plan,video,advice,weekly").includes(meta.source || "manual")) return "";
   const min = Number(env.AUTO_PUBLISH_MIN || 30);
   const block = autoBlockReasons(env, job);
-  if (block.length) return `\n⏸ Bài này em sẽ KHÔNG tự đăng (${block.join(", ")}) – chờ anh duyệt.`;
+  if (block.length) return `\n\n⏸ Chờ anh duyệt (không tự đăng: ${block.join(", ")})`;
   const token = String(Date.now());
   await kvSet(env, `ap:${job.id}`, token);
   await env.JOBS.send({ type: "autopub", jobId: job.id, token }, { delaySeconds: Math.min(min * 60, 43000) });
-  return `\n⏱ Sau ${min} phút anh chưa bấm gì, em sẽ tự hẹn đăng vào giờ vàng gần nhất.`;
+  return `\n\n⏱ ${min} phút không bấm → em tự đăng vào giờ vàng`;
 }
 async function runAutoPublish(env, jobId, token) {
   if ((await kvGet(env, `ap:${jobId}`)) !== token) return;
@@ -867,8 +921,8 @@ async function runAutoPublish(env, jobId, token) {
   const meta = JSON.parse((await kvGet(env, `meta:${jobId}`)) || "{}");
   await kvSet(env, `meta:${jobId}`, JSON.stringify({ ...meta, auto_published: true }));
   await hubEvent(env, { run: jobId, step: "review", status: "done", title: `Tự duyệt (anh chưa bấm sau ${env.AUTO_PUBLISH_MIN || 30} phút) – hẹn đăng ${vnLabel(at)}` });
-  await send(env, job.chat_id, `⏰ Anh chưa duyệt sau ${env.AUTO_PUBLISH_MIN || 30} phút → em tự hẹn đăng “${job.content.title_line1 || jobId}” lúc ${vnLabel(at)} lên ${targetsLabel(targets)}.`,
-    keyboard([[["🚫 Huỷ hẹn", `uc:${jobId}`], ["✅ Đăng ngay", `pub:${jobId}:${(await wantsVideo(env, jobId)) ? "allv" : "all"}`]]]));
+  await send(env, job.chat_id, `⏰ Tự hẹn đăng “${job.content.title_line1 || jobId}” lúc ${vnLabel(at)}`,
+    keyboard([[["🚫 Huỷ hẹn", `uc:${jobId}`], ["✅ Đăng ngay", `pub:${jobId}:allv`]]]));
 }
 
 // ---------------- Agent kiểm tra sau đăng ----------------
@@ -942,7 +996,7 @@ async function runAudit(env) {
     const head = `🔍 Kiểm tra sau đăng “${job.content?.title_line1 || id}”: ${ok.length}/${total} kênh OK`;
     const msg = [head, ok.length ? "✅ " + ok.join(" · ") : "", bad.length ? "❌ Lỗi:\n" + bad.map((x) => `• ${x}`).join("\n") : "", warn.length ? "⚠️ Lưu ý:\n" + warn.map((x) => `• ${x}`).join("\n") : ""].filter(Boolean).join("\n");
     await hubEvent(env, { run: id, step: "audit", status: bad.length ? "error" : "done", title: head, detail: msg });
-    if (bad.length || warn.length || env.AUDIT_REPORT_OK !== "0") await send(env, job.chat_id, msg, bad.length ? retryKb(id, bad.map((b) => `${b} lỗi`)) : {});
+    if (bad.length || env.AUDIT_REPORT_OK === "1") await send(env, job.chat_id, msg, bad.length ? retryKb(id, bad.map((b) => `${b} lỗi`)) : {});
   }
 }
 
@@ -1123,6 +1177,7 @@ const weekKey = () => { const d = vnNow(); const off = (d.getUTCDay() + 6) % 7; 
 const VN_DAYS = ["Chủ nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
 
 async function wantsVideo(env, jobId) {
+  if (env.VIDEO_ALWAYS !== "0") return true;   // mặc định: bài nào cũng làm video (GitHub Actions, không tốn API)
   const m = JSON.parse((await kvGet(env, `meta:${jobId}`)) || "{}");
   return m.with_video !== false; // bài anh tự gửi: mặc định có video; bài agent: theo chỉ tiêu video tuần
 }
@@ -1196,7 +1251,7 @@ async function runDaily(env) {
   const head = `📰 Bài hôm nay (${wk.fb + 1}/${target.fb_posts} tuần này${withVideo ? " · có video" : ""}): ${chosen.title}\n💡 ${pick?.reason || "điểm cao nhất trong ngày"}\nEm đang soạn kỹ (Opus), xong gửi anh duyệt…`;
   // 5) soạn bằng model mạnh nhất – mỗi ngày chỉ 1 bài nên ưu tiên chất lượng
   if (chosen.kind === "video") {
-    await send(env, chat, head);
+    if (env.DAILY_HEADS === "1") await send(env, chat, head);
     return startShareJob(env, chat, chosen.data, false, { quality: "strong", meta, silent: true });
   }
   const it = chosen.data;
@@ -1206,6 +1261,6 @@ async function runDaily(env) {
   const job = { id: crypto.randomUUID().slice(0, 8), chat_id: chat, status: "working", files: [], style: "auto", pages: "auto", quality: "strong", note, created_at: now() };
   await saveJob(env, job);
   await tagJob(env, kvSet, job.id, { source: chosen.kind === "news" ? "agent" : "plan", pillar: it.pillar, ...meta });
-  await send(env, chat, head);
+  if (env.DAILY_HEADS === "1") await send(env, chat, head);
   await env.JOBS.send({ type: "generate", jobId: job.id });
 }

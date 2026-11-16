@@ -166,12 +166,25 @@ def _gemini_all(texts, folder, key):
 
 
 # ---------------- Microsoft Edge TTS ----------------
+def _ensure_edge():
+    """Gọi edge-tts qua chính python đang chạy (không phụ thuộc PATH); thiếu thì tự cài."""
+    import importlib.util
+    import sys
+    if importlib.util.find_spec("edge_tts") is None:
+        log("chưa có edge-tts → tự cài")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "edge-tts"], check=True, capture_output=True, timeout=180)
+    return [sys.executable, "-m", "edge_tts"]
+
+
 def _edge_all(texts, folder):
     files = []
+    cmd = _ensure_edge()
     for i, t in enumerate(texts):
         f = folder / f"e{i:02d}.mp3"
-        subprocess.run(["edge-tts", "--voice", EDGE_VOICE, f"--rate={EDGE_RATE}", "--text", t, "--write-media", str(f)],
-                       check=True, capture_output=True, timeout=90)
+        subprocess.run([*cmd, "--voice", EDGE_VOICE, f"--rate={EDGE_RATE}", "--text", t, "--write-media", str(f)],
+                       capture_output=True, timeout=90, check=False)
+        if not f.exists() or f.stat().st_size < 1000:
+            raise RuntimeError("edge-tts không tạo được âm thanh")
         files.append(f)
     return files, f"Edge {EDGE_VOICE.split('-')[-1].replace('Neural', '')}"
 
