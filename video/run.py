@@ -25,6 +25,14 @@ MUSIC_DIR = ROOT / "music"
 STORY_MUSIC_DIR = MUSIC_DIR / "story"   # nhạc có lời, chỉ dùng cho Facebook Story
 AUDIO_EXT = (".mp3", ".m4a", ".aac", ".wav")
 
+def yt_meta(man):
+    """Tiêu đề/mô tả YouTube; bài không có sẵn youtube_title thì lấy từ tiêu đề poster / caption Facebook."""
+    mc = man.get("motion_content") or {}
+    title = man.get("youtube_title") or " ".join(x for x in [mc.get("title_line1"), mc.get("title_line2")] if x) or mc.get("story_hook") or "Bản tin Thuế – THT Audit"
+    desc = man.get("youtube_description") or man.get("facebook_caption") or title
+    clean = lambda t: str(t).replace("<", "").replace(">", "").strip()
+    return clean(title)[:100], clean(desc)[:4900]
+
 def tracks_in(d):
     return [p for p in d.glob("*") if p.suffix.lower() in AUDIO_EXT] if d.exists() else []
 FONT_CANDIDATES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"]
@@ -319,7 +327,7 @@ def main():
             try: results.append(f"🎞 IG Reels: {post_ig_reel(man['video_url'], man.get('ig_caption') or tags, man.get('ig_user_id', ''))}")
             except Exception as e: results.append(f"🎞 IG Reels lỗi: {e}")
         if "youtube" in targets:
-            try: results.append(f"▶️ YouTube: {post_youtube(out, man['youtube_title'], man['youtube_description'], man.get('youtube_tags', []), man['youtube_privacy'])}")
+            try: results.append(f"▶️ YouTube: {post_youtube(out, *yt_meta(man), man.get('youtube_tags') or [], man.get('youtube_privacy') or 'private')}")
             except Exception as e: results.append(f"▶️ YouTube lỗi: {e}")
     requests.post(f"{WORKER}/api/internal/notify/{job_id}", headers=H, json={"results": results}, timeout=60)
     log("\n".join(results))
