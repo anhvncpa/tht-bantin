@@ -196,7 +196,7 @@ export const LETTER_PDF_OPTIONS = {
   margin: { top: "14mm", right: "20mm", bottom: "30mm", left: "20mm" },
 };
 
-export async function htmlToPdf(env, html) {
+export async function htmlToPdf(env, html, pdfOptions = LETTER_PDF_OPTIONS) {
   if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) throw new Error("Chưa cấu hình CF_ACCOUNT_ID / CF_API_TOKEN cho Browser Rendering");
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/browser-rendering/pdf`, {
     method: "POST",
@@ -205,7 +205,7 @@ export async function htmlToPdf(env, html) {
       html,
       gotoOptions: { waitUntil: "networkidle0", timeout: 30000 },
       waitForSelector: { selector: "body[data-ready]", timeout: 15000 },
-      pdfOptions: LETTER_PDF_OPTIONS,
+      pdfOptions,
     }),
   });
   const type = res.headers.get("content-type") || "";
@@ -244,7 +244,10 @@ export async function saveLetter(env, letter, pdf) {
   return key;
 }
 
-export const letterFileName = (l) => `THT_Thu-tu-van_${l.number.replace(/\//g, "-")}.pdf`;
+// kind: "thu_tu_van" (mặc định) | "chuyen_de" (Cẩm nang Giám đốc) – lưu trong data.kind
+export const letterKind = (l) => (typeof l.data === "string" ? JSON.parse(l.data || "{}") : l.data || {}).kind || "thu_tu_van";
+export const letterFileName = (l) => letterKind(l) === "chuyen_de"
+  ? `THT_Cam-nang-Giam-doc_${l.number.replace(/\//g, "-")}.pdf` : `THT_Thu-tu-van_${l.number.replace(/\//g, "-")}.pdf`;
 
 const b64 = (bytes) => { let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(bin); };
 
@@ -276,6 +279,10 @@ async function pushToMyTHT(env, letter, pdf) {
 // Tiêu đề + lời gửi email mẫu (My THT dùng khi gửi theo danh sách khách hàng)
 export function emailTemplate(l) {
   const vv = l.subject.charAt(0).toLowerCase() + l.subject.slice(1);
+  if (letterKind(l) === "chuyen_de") return {
+    subject: `[THT] Cẩm nang Giám đốc số ${l.number}: ${l.subject}`,
+    body: `Kính gửi Quý Khách hàng,\n\nCông ty TNHH Kiểm toán và Tư vấn THT trân trọng gửi Quý Khách hàng tài liệu Cẩm nang Giám đốc số ${l.number}: ${l.subject} (đính kèm).\n\nTài liệu tổng hợp các quy định quan trọng, kèm ví dụ và danh sách việc cần làm để Ban Giám đốc nắm bắt nhanh. Nếu cần áp dụng cho trường hợp cụ thể của doanh nghiệp mình, Quý Khách hàng vui lòng phản hồi email này hoặc liên hệ THT.\n\nTrân trọng,\nCông ty TNHH Kiểm toán và Tư vấn THT\nthtaudit.com.vn`,
+  };
   return {
     subject: `[THT] Thư tư vấn số ${l.number} – V/v: ${l.subject}`,
     body: `Kính gửi Quý Khách hàng,\n\nCông ty TNHH Kiểm toán và Tư vấn THT trân trọng gửi Quý Khách hàng Thư tư vấn số ${l.number} về việc ${vv} (đính kèm).\n\nNếu cần trao đổi thêm cho trường hợp cụ thể của doanh nghiệp mình, Quý Khách hàng vui lòng phản hồi email này hoặc liên hệ THT.\n\nTrân trọng,\nCông ty TNHH Kiểm toán và Tư vấn THT\nthtaudit.com.vn`,
@@ -340,6 +347,6 @@ export async function letterRoutes(request, env, url) {
   const base = env.PUBLIC_BASE_URL || url.origin;
   return J({ letters: rows.map(({ data, ...r }) => {
     const d = JSON.parse(data || "{}");
-    return { ...r, synced: !!r.synced, conclusion: d.conclusion || "", legal_basis: d.legal_basis || [], pdf_url: `${base}/hub/api/letters/${r.id}.pdf`, file_name: letterFileName(r), email: emailTemplate(r) };
+    return { ...r, kind: d.kind || "thu_tu_van", synced: !!r.synced, conclusion: d.conclusion || "", legal_basis: d.legal_basis || [], pdf_url: `${base}/hub/api/letters/${r.id}.pdf`, file_name: letterFileName({ ...r, data: d }), email: emailTemplate({ ...r, data: d }) };
   }) });
 }

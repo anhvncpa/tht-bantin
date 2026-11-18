@@ -22,6 +22,7 @@ import { posterQA, qaText, crossCheck, adviceFacts, mismatchesToUncertain } from
 import { pageToken } from "./facebook.js";
 import { threadsToken } from "./social.js";
 import { tiktokPostRoutes, tiktokPostUrl, tiktokAudited } from "./tiktokpost.js";
+import { handbookOutline, outlineText, writeHandbook, reviseHandbook, handbookFacts, finalizeDoc, renderHandbook, nextHandbookNumber, handbookFileName, handbookCaption } from "./handbook_agent.js";
 
 // Kênh đăng: "all" = bài ảnh/chữ, "allv" = kèm các kênh video (dựng trên GitHub Actions)
 const POST_TARGETS = (env) => list(env.POST_TARGETS || "fb,story,ig,threads");
@@ -39,6 +40,7 @@ function expandTargets(env, arg) {
   for (const t of String(arg || "").split(",")) {
     if (t === "all") out.push(...POST_TARGETS(env));
     else if (t === "allv") out.push(...POST_TARGETS(env), ...VIDEO_TARGETS(env));
+    else if (t === "vid") out.push(...VIDEO_TARGETS(env));
     else if (t) out.push(t);
   }
   return [...new Set(out)];
@@ -94,6 +96,7 @@ const reviewKb = (id, video = true) => keyboard([
   [["✅ Duyệt – đăng tất cả", `pub:${id}:allv`], ["⏰ Hẹn giờ", `sh:${id}`], ["✉️ Thư", `lm:${id}`], ["🌐 VI⇄EN", `bi:${id}`]],
   [["📘 FB", `pub:${id}:fb`], ["📱 Story", `pub:${id}:story`], ["📸 Instagram", `pub:${id}:ig`], ["🧵 Threads", `pub:${id}:threads`]],
   [["🎵 TikTok", `pub:${id}:tiktok`], ["▶️ YouTube", `pub:${id}:youtube`], ["🎞 FB Reels", `pub:${id}:reels`], ["🎞 IG Reels", `pub:${id}:igreels`]],
+  [["🎬 Dựng lại video – đăng 4 kênh video", `pub:${id}:vid`]],
   [["✏️ Sửa", `ed:${id}`], ["🎨 Mẫu", `rs:${id}`], ["🧠 Soạn kỹ", `hq:${id}`], ["❌ Huỷ", `x:${id}`]],
 ]);
 // Hẹn đăng vào giờ vàng (FB bài viết + Story theo AGENT_TARGETS)
@@ -101,7 +104,7 @@ const schedKb = (env, id) => keyboard([
   nextSlots(env, 3).map((at) => [`⏰ ${vnLabel(at)}`, `sc:${id}:${Math.round(at / 60000)}`]),
   [["🚫 Không hẹn", `uc:${id}`]],
 ]);
-const TARGET_NAMES = { fb: "FB bài viết", story: "FB Story", ig: "Instagram", threads: "Threads", tiktok: "TikTok", youtube: "YouTube", reels: "FB Reels", igreels: "IG Reels", all: "5 kênh (bài)", allv: "5 kênh + video" };
+const TARGET_NAMES = { fb: "FB bài viết", story: "FB Story", ig: "Instagram", threads: "Threads", tiktok: "TikTok", youtube: "YouTube", reels: "FB Reels", igreels: "IG Reels", all: "5 kênh (bài)", allv: "5 kênh + video", vid: "4 kênh video (dựng lại)" };
 const targetsLabel = (t) => String(t).split(",").map((x) => TARGET_NAMES[x] || x).join(" + ");
 // Thư tư vấn chỉ làm khi người dùng bấm chọn (mặc định không làm, không tốn API)
 const letterKb = (id) => keyboard([
@@ -123,6 +126,10 @@ const editKey = (chat, uid) => `edit:${chat}:${uid}`;
 const armKey = (chat, uid) => `arm:${chat}:${uid}`;
 const askKey = (chat, uid) => `ask:${chat}:${uid}`;     // đang chờ anh nhắn vấn đề cần tư vấn
 const reviseKey = (chat, uid) => `advfix:${chat}:${uid}`; // đang chờ anh nhắn yêu cầu sửa thư
+const hbAskKey = (chat, uid) => `hbask:${chat}:${uid}`;   // đang chờ anh nhắn chủ đề Cẩm nang
+const hbFixKey = (chat, uid) => `hbfix:${chat}:${uid}`;   // đang chờ yêu cầu sửa dàn ý/bản nháp Cẩm nang ("<id>:outline|doc")
+const hbOutlineKb = (id) => keyboard([[["✅ Duyệt dàn ý – viết bài", `hb:${id}:go`]], [["✏️ Sửa dàn ý", `hb:${id}:eo`], ["❌ Huỷ", `hb:${id}:x`]]]);
+const hbDraftKb = (id, theme) => keyboard([[["✅ Duyệt – cấp số, lưu My THT", `hb:${id}:ok`]], [["✏️ Sửa", `hb:${id}:ed`], [theme === "noir" ? "🎨 Mẫu trắng" : "🎨 Mẫu đen – vàng", `hb:${id}:th`], ["❌ Huỷ", `hb:${id}:x`]]]);
 // Bước 1 – chọn đầu ra; bước 2 – duyệt bản nháp thư
 const advKb = (id) => keyboard([[["✉️ Thư tư vấn PDF", `av:${id}:letter`], ["🖼 Poster", `av:${id}:poster`], ["📦 Cả hai", `av:${id}:both`]]]);
 const letterKbd = (id) => keyboard([
@@ -155,7 +162,7 @@ export async function handleUpdate(update, env) {
       "• Gửi nhiều ảnh cùng lúc (album) = 1 bài. Gửi thêm ảnh sau đó vẫn cộng vào bài đang làm; muốn sang bài khác gõ /moi.\n" +
       "• Poster mặc định song ngữ Việt – Anh, bài Facebook có phần English below. Bấm 🌐 VI⇄EN để đổi sang chỉ tiếng Việt.\n" +
       (group ? "• Trong nhóm bot: gửi file/ảnh là bot nhận luôn. Ghi chú thêm: trả lời (reply) tin nhắn của bot.\n" : "") +
-      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /tuvan hỏi một vấn đề → Thư tư vấn PDF + Poster · /lich lịch đăng · /danglai đăng lại bài gần nhất · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
+      `Lệnh: /moi bài mới · /bantin (nhóm) · /quet Agent tìm tin mới · /video tìm video chính sách · /kehoach kế hoạch tuần · /xuhuong xu hướng tuần · /baocao báo cáo fanpage · /tuvan hỏi một vấn đề → Thư tư vấn PDF + Poster · /chuyende Cẩm nang Giám đốc 8–10 trang · /lich lịch đăng · /danglai đăng lại bài gần nhất · /soanlai soạn lại bài lỗi · /id xem ID${env.DRY_RUN === "1" ? "\n⚠️ Đang CHẾ ĐỘ THỬ (không đăng thật)" : ""}`);
   }
   if (cmd === "/quet") {
     await send(env, chat, "🤖 Đang quét các trang Cục Thuế, Bộ Tài chính, VACPA, Chính phủ… (2–4 phút)");
@@ -167,6 +174,11 @@ export async function handleUpdate(update, env) {
     if (!r) return send(env, chat, "Không có bài nào đang bị lỗi để soạn lại.");
     await send(env, chat, "🔁 Đang soạn lại bài bị lỗi gần nhất…");
     return env.JOBS.send({ type: "generate", jobId: r.id });
+  }
+  if (cmd === "/chuyende" || cmd === "/camnang") {
+    const t = m.text.replace(/^\/\S+\s*/, "").trim();
+    if (!t) { await kvSet(env, hbAskKey(chat, uid), "1"); return send(env, chat, "📘 Anh nhắn chủ đề Cẩm nang Giám đốc (vd: “Tổng hợp các trường hợp ưu đãi thuế TNDN theo quy định hiện hành”)."); }
+    return startHandbook(env, chat, t);
   }
   if (cmd === "/tuvan" || cmd === "/hoi") {
     const q = m.text.replace(/^\/\S+\s*/, "").trim();
@@ -236,6 +248,14 @@ export async function handleUpdate(update, env) {
       await send(env, chat, `🔎 Em đang tra cứu nguồn chính thức cho vấn đề:\n“${q}”\n(2–4 phút)`);
       return env.JOBS.send({ type: "advise", chat, q });
     }
+    if (await kvGet(env, hbAskKey(chat, uid))) { await kvDel(env, hbAskKey(chat, uid)); return startHandbook(env, chat, m.text.trim()); }
+    const hbFix = await kvGet(env, hbFixKey(chat, uid));
+    if (hbFix) {
+      await kvDel(env, hbFixKey(chat, uid));
+      const [hid, mode] = hbFix.split(":");
+      await send(env, chat, mode === "outline" ? "✏️ Đang sửa dàn ý…" : "✏️ Đang sửa bản nháp Cẩm nang (2–4 phút)…");
+      return env.JOBS.send(mode === "outline" ? { type: "hb_outline", id: hid, instruction: m.text.trim() } : { type: "hb_revise", id: hid, instruction: m.text.trim() });
+    }
     const fixing = await kvGet(env, reviseKey(chat, uid));
     if (fixing) {
       await kvDel(env, reviseKey(chat, uid));
@@ -279,6 +299,7 @@ async function onButton(q, env) {
   const [act, id, arg] = q.data.split(":");
   if (act === "ip") return pickIdeas(env, chat, q, arg);
   if (act === "av") return onAdviceButton(env, chat, uid, q, id, arg);
+  if (act === "hb") return onHandbookButton(env, chat, uid, q, id, arg);
   if (act === "sg") {
     await kvSet(env, "growth:strategy_off", arg === "off" ? "1" : "0");
     return send(env, chat, arg === "off" ? "↩️ Đã tạm không áp dụng điều chỉnh tự động, bot chạy theo cấu hình gốc. Bật lại: bấm nút ✅ ở báo cáo tuần." : "✅ Đã bật lại điều chỉnh tự động theo tự đánh giá tuần.");
@@ -368,6 +389,7 @@ export async function processTask(task, env) {
   if (task.type === "insights") return runInsights(env, task.chat);
   if (task.type === "trends") return runTrends(env, task.chat, task.thenPlan);
   if (task.type === "advise") return runAdvise(env, task.chat, task.q);
+  if (task.type?.startsWith("hb_")) return runHandbookTask(env, task);
   if (task.type === "advletter") return makeAdviceLetter(env, task.advId, task.instruction);
   if (task.type === "advok") return approveAdviceLetter(env, task.advId);
   if (task.type === "autopub") return runAutoPublish(env, task.jobId, task.token);
@@ -740,6 +762,7 @@ export async function setupWebhook(url, env) {
     { command: "moi", description: "Bắt đầu bài mới" },
     { command: "bantin", description: "Bài mới (dùng trong nhóm)" },
     { command: "tuvan", description: "Hỏi 1 vấn đề → Thư tư vấn PDF + Poster" },
+    { command: "chuyende", description: "Cẩm nang Giám đốc 8–10 trang (PDF + ảnh Facebook)" },
     { command: "danglai", description: "Đăng lại bài gần nhất lên kênh bị lỗi" },
     { command: "xuhuong", description: "Nghiên cứu xu hướng tuần" },
     { command: "kehoach", description: "Kế hoạch nội dung tuần" },
@@ -1302,4 +1325,118 @@ async function runDaily(env) {
   await tagJob(env, kvSet, job.id, { source: chosen.kind === "news" ? "agent" : "plan", pillar: it.pillar, ...meta });
   if (env.DAILY_HEADS === "1") await send(env, chat, head);
   await env.JOBS.send({ type: "generate", jobId: job.id });
+}
+
+
+// ---------------- Cẩm nang Giám đốc (/chuyende): dàn ý → bản nháp → duyệt → My THT → Facebook ----------------
+const hbGet = async (env, id) => JSON.parse((await kvGet(env, `hb:${id}`)) || "null");
+const hbSave = (env, r) => kvSet(env, `hb:${r.id}`, JSON.stringify(r));
+
+async function startHandbook(env, chat, topic) {
+  const id = "cd" + crypto.randomUUID().slice(0, 6);
+  await hbSave(env, { id, chat, topic, theme: env.HANDBOOK_THEME || "noir", status: "outline", created_at: new Date().toISOString() });
+  await hubEvent(env, { run: `hb-${id}`, step: "scout", status: "start", runTitle: `Cẩm nang: ${topic.slice(0, 80)}`, title: "Tra cứu và lập dàn ý" });
+  await send(env, chat, `📘 Em đang tra cứu và lập dàn ý Cẩm nang Giám đốc:\n“${topic}”\n(khoảng 3 phút, xong em gửi dàn ý để anh duyệt trước khi viết)`);
+  return env.JOBS.send({ type: "hb_outline", id });
+}
+
+async function onHandbookButton(env, chat, uid, q, id, arg) {
+  const r = await hbGet(env, id);
+  if (!r) return send(env, chat, "Cẩm nang này đã hết hạn, gõ /chuyende để làm mới.");
+  const clearKb = () => tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } });
+  if (arg === "x") { await clearKb(); r.status = "dropped"; await hbSave(env, r); return send(env, chat, "❌ Đã huỷ Cẩm nang này."); }
+  if (arg === "eo") { await kvSet(env, hbFixKey(chat, uid), `${id}:outline`); return send(env, chat, "Anh nhắn yêu cầu sửa dàn ý (vd: “thêm phần về hồ sơ chứng minh”, “bỏ phần 5”, “gộp phần 2 và 3”)."); }
+  if (arg === "ed") { await kvSet(env, hbFixKey(chat, uid), `${id}:doc`); return send(env, chat, "Anh nhắn yêu cầu sửa bản nháp (vd: “thêm ví dụ ở phần 3”, “rút gọn phần 5”, “sửa con số …”)."); }
+  if (arg === "go") { if (r.status !== "outline") return; await clearKb(); await send(env, chat, "✍️ Đang viết toàn văn và kiểm tra số liệu (khoảng 5–8 phút)…"); return env.JOBS.send({ type: "hb_write", id }); }
+  if (arg === "th") { if (r.status === "approved") return; await clearKb(); r.theme = r.theme === "noir" ? "classic" : "noir"; await hbSave(env, r); await send(env, chat, "🎨 Đang dựng lại theo mẫu mới…"); return env.JOBS.send({ type: "hb_draft", id }); }
+  if (arg === "ok") { if (r.status === "approved") return send(env, chat, `Cẩm nang này đã duyệt (số ${r.number}).`); await clearKb(); await send(env, chat, "✅ Đang cấp số, dựng bản chính thức và lưu vào My THT…"); return env.JOBS.send({ type: "hb_ok", id }); }
+  if (arg === "fb") { if (r.fb) return send(env, chat, `Đã đăng Facebook rồi: ${r.fb}`); await clearKb(); await send(env, chat, "📘 Đang đăng album 10 ảnh lên Facebook…"); return env.JOBS.send({ type: "hb_fb", id }); }
+}
+
+async function runHandbookTask(env, task) {
+  const r = await hbGet(env, task.id);
+  if (!r || r.status === "dropped") return;
+  const RUN = `hb-${r.id}`;
+  env = { ...env, HUB_RUN: RUN };
+  try {
+    if (task.type === "hb_outline") {
+      r.outline = await handbookOutline(env, r.topic, task.instruction || "", task.instruction ? r.outline : null);
+      r.status = "outline"; await hbSave(env, r);
+      await hubEvent(env, { run: RUN, step: "draft", status: "waiting", title: `Dàn ý: ${r.outline.title} – chờ anh duyệt` });
+      return send(env, r.chat, outlineText(r.outline), hbOutlineKb(r.id));
+    }
+    if (task.type === "hb_write") {
+      let d = await writeHandbook(env, r.topic, r.outline);
+      const verified = [];
+      try {
+        const g = await crossCheck(env, handbookFacts(d));
+        if (Array.isArray(g)) d.uncertain = [...(d.uncertain || []), ...mismatchesToUncertain(g)];
+      } catch (_) {}
+      if (d.uncertain?.length && env.COUNCIL_ENABLED !== "0") {
+        try {
+          const checks = await verifyUncertain(env, d.uncertain, d.title);
+          const fixes = checks.filter((c) => c.status === "corrected" && c.fix).map((c) => `Sửa thông tin: ${c.fix}`);
+          if (fixes.length) { try { d = { ...d, ...(await reviseHandbook(env, d, fixes.join("\n"))) }; } catch (_) {} }
+          d.uncertain = checks.filter((c) => c.status === "unresolved").map((c) => c.item);
+          checks.filter((c) => c.status !== "unresolved").forEach((c) => verified.push(`${c.status === "corrected" ? "✏️ đã sửa" : "✅ đã xác nhận"}: ${c.item}`));
+        } catch (_) {}
+      }
+      r.doc = d; r.verified = verified; r.status = "draft"; await hbSave(env, r);
+      return hbDraft(env, r);
+    }
+    if (task.type === "hb_revise") {
+      r.doc = { ...r.doc, ...(await reviseHandbook(env, r.doc, task.instruction)) }; r.status = "draft"; await hbSave(env, r);
+      return hbDraft(env, r, true);
+    }
+    if (task.type === "hb_draft") return hbDraft(env, r);
+    if (task.type === "hb_ok") {
+      if (!r.number) Object.assign(r, await nextHandbookNumber(env, kvGet, kvSet));
+      const doc = finalizeDoc(env, r.doc, { number: r.number, issue: r.issue, theme: r.theme });
+      const { pdf } = await renderHandbook(env, doc, `hb/${r.id}/final`);
+      const letter = { id: r.id, number: r.number, subject: doc.title, question: doc.subtitle, created_at: r.created_at, approved_at: new Date().toISOString(),
+        data: { kind: "chuyen_de", conclusion: (doc.key_points || []).join(" "), key_points: doc.key_points, legal_basis: (doc.legal || []).map((l) => ({ doc: l.doc, article: l.note || "" })) } };
+      await saveLetter(env, letter, pdf);
+      const mytht = await syncLetter(env, letter, pdf);
+      r.status = "approved"; r.approved_at = letter.approved_at; await hbSave(env, r);
+      await sendDocument(env, r.chat, pdf, handbookFileName(doc), "application/pdf", `✅ Cẩm nang Giám đốc số ${r.number} (đã duyệt)\n${doc.title}\n📁 ${mytht}`);
+      await hubEvent(env, { run: RUN, step: "publish", status: /lỗi|chưa/.test(mytht) ? "info" : "done", title: `Duyệt Cẩm nang ${r.number}: ${doc.title}`, detail: mytht });
+      return send(env, r.chat, "Bộ 10 ảnh đã sẵn sàng. Anh muốn đăng lên Facebook không? (em chỉ đăng khi anh bấm)", keyboard([[["📘 Đăng Facebook", `hb:${r.id}:fb`]]]));
+    }
+    if (task.type === "hb_fb") {
+      const doc = finalizeDoc(env, r.doc, { number: r.number, issue: r.issue, theme: r.theme });
+      const cards = [];
+      for (let i = 1; i <= doc.cards.length; i++) {
+        const o = await env.FILES.get(`hb/${r.id}/final/card${String(i).padStart(2, "0")}.png`);
+        if (o) cards.push(new Uint8Array(await o.arrayBuffer()));
+      }
+      if (env.DRY_RUN === "1") return send(env, r.chat, "📘 Chế độ thử: chưa đăng Facebook.");
+      const url = await postToPage(env, cards, handbookCaption(doc));
+      r.fb = url; await hbSave(env, r);
+      await hubEvent(env, { run: RUN, step: "publish", status: "done", title: `Đăng Facebook Cẩm nang ${r.number}`, detail: url });
+      return send(env, r.chat, `✅ Đã đăng Facebook: ${url}`);
+    }
+  } catch (e) {
+    await hubEvent(env, { run: RUN, step: task.type, status: "error", title: `Cẩm nang lỗi: ${e.message}` });
+    const retry = { hb_outline: "eo", hb_write: "go", hb_revise: "ed", hb_draft: "th", hb_ok: "ok", hb_fb: "fb" }[task.type];
+    return send(env, r.chat, `📘 Cẩm nang bị lỗi ở bước ${task.type.replace("hb_", "")}: ${e.message}`,
+      task.type === "hb_write" || task.type === "hb_ok" || task.type === "hb_fb" ? keyboard([[["🔁 Thử lại", `hb:${r.id}:${retry}`]]]) : {});
+  }
+}
+
+// Bản nháp: PDF + album ảnh + tóm tắt kiểm tra → nút duyệt
+async function hbDraft(env, r, revised = false) {
+  const y = new Date(Date.now() + 7 * 3600e3).getUTCFullYear();
+  const doc = finalizeDoc(env, r.doc, { number: `CĐ-…/${y}/THT (bản nháp)`, issue: "…", theme: r.theme });
+  const { pdf, cards } = await renderHandbook(env, doc, `hb/${r.id}/draft`);
+  await sendDocument(env, r.chat, pdf, `NHAP_${handbookFileName({ number: r.id })}`, "application/pdf",
+    `📝 BẢN NHÁP Cẩm nang Giám đốc${revised ? " (đã sửa)" : ""}\n${doc.title}`);
+  await sendAlbum(env, r.chat, cards.map((b, i) => ({ name: `anh${String(i + 1).padStart(2, "0")}.png`, bytes: b })), `🖼 ${cards.length} ảnh Facebook (bản nháp)`);
+  const lines = [
+    `📘 ${doc.title}`,
+    `${doc.chapters.length} phần · ${doc.key_points.length} ý cần nhớ · ${doc.faq?.length || 0} câu hỏi đáp · mẫu ${r.theme === "noir" ? "đen – vàng" : "trắng"}`,
+    r.verified?.length ? `🔎 Em đã tự kiểm tra:\n${r.verified.slice(0, 6).map((x) => `• ${x}`).join("\n")}` : "",
+    r.doc.uncertain?.length ? `❓ Cần anh xem:\n${r.doc.uncertain.slice(0, 6).map((x) => `• ${x}`).join("\n")}` : "✅ Không còn điểm nào em chưa xác nhận được.",
+  ].filter(Boolean).join("\n\n");
+  await hubEvent(env, { run: `hb-${r.id}`, step: "review", status: "waiting", title: `Bản nháp Cẩm nang: ${doc.title} – chờ anh duyệt` });
+  return send(env, r.chat, lines, hbDraftKb(r.id, r.theme));
 }
