@@ -1,9 +1,9 @@
 // Agent tương tác fanpage (tăng like/theo dõi, tiết kiệm API Claude):
 // 1) Chuyên mục cố định: "Thuế 60 giây" thứ 2-4-6, "Hỏi đáp thứ 7" – chỉ thêm 1 dòng vào bài, không gọi Claude.
-// 2) Bình luận đầu tiên do trang viết ngay sau khi đăng: câu hỏi mở + link tư vấn (link để ở bình luận, không để trong bài) – không gọi Claude.
+// 2) Bình luận đầu tiên do trang viết ngay sau khi đăng: câu hỏi mở + số điện thoại/Zalo tư vấn – không gọi Claude. Không gửi form/link thu thập thông tin.
 // 3) Cẩm nang Giám đốc: ai bình luận "CẨM NANG" → trang tự trả lời kèm link PDF (mẫu cố định, không gọi Claude).
-// 4) Bình luận khác: soạn câu trả lời bằng model rẻ (Haiku). Mặc định TỰ ĐĂNG sau ENGAGE_REPLY_DELAY phút (10) –
-//    trong thời gian đó anh có thể bấm Sửa / Không trả lời trên Telegram. ENGAGE_AUTO_REPLY="0" → chỉ đăng khi anh bấm duyệt.
+// 4) Bình luận khác: soạn câu trả lời bằng model rẻ (Haiku) và TỰ ĐĂNG ngay (ENGAGE_REPLY_DELAY phút chờ, mặc định 0), báo lại Telegram.
+//    Câu hỏi chuyên môn khó → mời liên hệ 0901 144 078 (điện thoại/Zalo). ENGAGE_AUTO_REPLY="0" → chỉ đăng khi anh bấm duyệt.
 //    Bình luận ngắn/biểu tượng cảm xúc → dùng mẫu cảm ơn, không gọi Claude. Giới hạn ENGAGE_MAX_DRAFTS bản nháp/ngày (mặc định 12).
 // 5) Câu hỏi trong bình luận (có dấu "?") được gom lại cho bài "Hỏi đáp thứ 7".
 // Cần token Facebook có quyền pages_manage_engagement + pages_read_user_content. Thiếu quyền thì bỏ qua êm, không làm hỏng việc đăng bài.
@@ -14,7 +14,6 @@ const graph = (env) => `https://graph.facebook.com/${env.FB_GRAPH_VERSION || "v2
 const VN = 7 * 3600e3;
 const vnDay = () => new Date(Date.now() + VN).getUTCDay();   // 0 = Chủ nhật
 const dayKey = () => new Date(Date.now() + VN).toISOString().slice(0, 10);
-const FORM = (env) => env.DEFAULT_QR_URL || "https://form.thtaudit.com.vn/";
 
 // ---------- 1) Chuyên mục cố định ----------
 export function seriesLine(env) {
@@ -50,7 +49,7 @@ export async function firstComment(env, postUrl, caption, extra = "") {
   if (env.ENGAGE_ENABLED === "0" || env.DRY_RUN === "1") return null;
   const q = String(caption || "").split("\n").map((l) => l.trim()).filter((l) => /\?$/.test(l) && l.length < 160).pop()
     || "Doanh nghiệp của anh/chị đã áp dụng điểm này chưa? Có vướng mắc gì cứ để lại bình luận nhé.";
-  const msg = [`💬 ${q}`, extra, `👉 Đăng ký tư vấn miễn phí: ${FORM(env)}`, "🔔 Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày."].filter(Boolean).join("\n");
+  const msg = [`💬 ${q}`, extra, "📞 Cần tư vấn thêm: gọi hoặc nhắn Zalo 0901 144 078", "🔔 Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày."].filter(Boolean).join("\n");
   try { return await fbComment(env, postIdOf(postUrl), msg); } catch (e) { console.log("firstComment", e.message); return null; }
 }
 
@@ -66,7 +65,7 @@ const TRIVIAL = (t) => { const s = String(t || "").replace(/[\p{Emoji}\s.!]+/gu,
 async function draftReply(env, comment, title) {
   if (TRIVIAL(comment.message)) return `Cảm ơn ${comment.from?.name ? comment.from.name.split(" ").pop() : "anh/chị"} đã quan tâm ❤️ Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày nhé!`;
   const msg = await claude(env, { model: modelFor(env, "cheap"), max_tokens: 300,
-    system: "Bạn trả lời bình luận trên fanpage THT Audit (Công ty Kiểm toán & Tư vấn THT) bằng tiếng Việt, xưng THT, gọi anh/chị. Tối đa 3 câu, thân thiện, chính xác; không khẳng định con số/văn bản nếu không chắc. Câu hỏi cần xem hồ sơ cụ thể thì mời nhắn tin trang hoặc gọi 0901 144 078. Không dùng hashtag. Chỉ trả về nội dung câu trả lời.",
+    system: "Bạn là admin fanpage THT Audit (Công ty Kiểm toán & Tư vấn THT), trả lời bình luận bằng tiếng Việt tự nhiên như người thật: xưng THT hoặc em, gọi anh/chị, ngắn gọn 1–3 câu, thân thiện, không văn mẫu, không hashtag. Chỉ trả lời điều chắc chắn; không khẳng định con số/văn bản nếu không chắc. Câu hỏi chuyên môn khó, phức tạp hoặc cần xem hồ sơ cụ thể: trả lời ý chung ngắn (nếu chắc) rồi mời anh/chị liên hệ 0901 144 078 qua điện thoại hoặc Zalo để được tư vấn rõ hơn. Tuyệt đối không gửi link, form hay yêu cầu khách điền/cung cấp thông tin. Chỉ trả về nội dung câu trả lời.",
     messages: [{ role: "user", content: `Bài viết: ${title}\nBình luận của ${comment.from?.name || "người xem"}: ${comment.message}` }] });
   return msg.content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
 }
@@ -96,7 +95,7 @@ export async function pollComments(env, deps) {
       seen.add(c.id);
       // Cẩm nang: trả lời tự động kèm link PDF
       if (p.kind === "handbook" && /c[aẩâ]m\s*nang/i.test(c.message) && p.pdf) {
-        try { await fbComment(env, c.id, `THT gửi ${c.from?.name ? c.from.name.split(" ").pop() : "anh/chị"} bản PDF Cẩm nang Giám đốc: ${p.pdf}\nCần tư vấn cho doanh nghiệp mình: ${FORM(env)} hoặc 0901 144 078.`); } catch (e) { console.log("hb reply", e.message); }
+        try { await fbComment(env, c.id, `THT gửi ${c.from?.name ? c.from.name.split(" ").pop() : "anh/chị"} bản PDF Cẩm nang Giám đốc ạ: ${p.pdf}\nCần trao đổi thêm cho doanh nghiệp mình, anh/chị gọi hoặc nhắn Zalo 0901 144 078 nhé.`); } catch (e) { console.log("hb reply", e.message); }
         continue;
       }
       if (/\?/.test(c.message) && c.message.length > 15) qs.unshift({ q: c.message.slice(0, 300), post: p.title, at: Date.now() });
@@ -106,7 +105,12 @@ export async function pollComments(env, deps) {
       used++;
       await kv.set(env, `rep:${c.id}`, JSON.stringify({ id: c.id, text, name: c.from?.name || "", msg: c.message.slice(0, 500), post: p.title }));
       const auto = env.ENGAGE_AUTO_REPLY !== "0";
-      const delay = Number(env.ENGAGE_REPLY_DELAY || 10);
+      const delay = Number(env.ENGAGE_REPLY_DELAY || 0);
+      if (auto && delay <= 0) {
+        try { await fbComment(env, c.id, text); await kv.del(env, `rep:${c.id}`); await deps.send(deps.chat, `💬 “${p.title.slice(0, 50)}” · ${c.from?.name || "Người xem"}: ${c.message.slice(0, 200)}\n↪️ Đã tự trả lời: ${text}`); }
+        catch (e) { await deps.send(deps.chat, `❌ Chưa tự trả lời được bình luận của ${c.from?.name || "người xem"}: ${e.message}`); }
+        continue;
+      }
       if (auto) { const pend = JSON.parse((await kv.get(env, "eng:pending")) || "[]"); pend.push({ id: c.id, due: Date.now() + delay * 60e3 }); await kv.set(env, "eng:pending", JSON.stringify(pend)); }
       await deps.send(deps.chat, `💬 Bình luận mới · “${p.title.slice(0, 60)}”\n${c.from?.name || "Người xem"}: ${c.message.slice(0, 400)}\n\n✍️ ${auto ? `Trả lời sẽ TỰ ĐĂNG sau ${delay} phút` : "Đề xuất trả lời"}:\n${text}`,
         deps.keyboard([[["✅ Đăng ngay", `rp:${c.id}:ok`], ["✏️ Sửa", `rp:${c.id}:ed`], ["❌ Không trả lời", `rp:${c.id}:x`]]]));
