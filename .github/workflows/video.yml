@@ -1,4 +1,5 @@
 name: video
+run-name: video ${{ inputs.job_id }} ${{ inputs.targets }}
 # Được Worker gọi khi anh bấm đăng Story / Reels / TikTok / YouTube trên Telegram
 on:
   workflow_dispatch:
