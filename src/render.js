@@ -29,10 +29,37 @@ var p=document.getElementById('poster');p.style.height='auto';var h=p.scrollHeig
 if(h>${A4H}){var z=Math.max(.72,${A4H}/h);p.style.zoom=z;p.style.width=(${A4W}/z)+'px';p.style.height=(${A4H}/z)+'px';}
 document.body.setAttribute('data-fit',String(h));document.body.setAttribute('data-ready','1');})();</script>`;
 
+// Phong cách xu hướng tuần: giữ bố cục mẫu THT (nền sáng 1/2/4/5), thay màu nhấn + font tiêu đề
+// Mẫu 1 dùng màu nhấn cả trên nền trắng lẫn nền navy → chỉnh độ sáng vào khoảng đọc được trên cả hai
+const _lum = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+const _mix = (h, t, k) => [0, 2, 4].map((i) => Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - k) + t * k).toString(16).padStart(2, "0")).join("");
+function midTone(hex) {
+  let h = String(hex || "").replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(h)) return hex;
+  for (let i = 0; i < 20 && _lum(h) < 0.18; i++) h = _mix(h, 255, 0.12);
+  for (let i = 0; i < 20 && _lum(h) > 0.29; i++) h = _mix(h, 0, 0.12);
+  return "#" + h.toUpperCase();
+}
+const LOOK_SWAP = {
+  "1": (l) => [["#FC5A1B", midTone(l.accent)], ["#FFF6F2", l.soft]],
+  "2": (l) => [["#2345F5", l.accent], ["#EEF1FF", l.soft], ["#8FA2FF", l.highlight]],
+  "4": (l) => [["#6B1E2E", l.accent], ["#F4ECEE", l.soft]],
+  "5": (l) => [["#FFD23F", l.highlight], ["#FF5C39", l.accent]],
+};
+const FIRST_FONT = { "1": "Inter", "2": "IBM Plex Sans", "4": "Source Serif 4", "5": "Plus Jakarta Sans" };
+export function applyLook(html, style, look) {
+  if (!look || !LOOK_SWAP[style]) return html;
+  for (const [from, to] of LOOK_SWAP[style](look)) if (to) html = html.split(from).join(to).split(from.toLowerCase()).join(to);
+  if (look.display_font && FIRST_FONT[style]) html = html.split(`'${FIRST_FONT[style]}'`).join(`'${look.display_font}'`);
+  return html;
+}
+
 export function pageDocument(style, content, env, qrUrl, index, mode = "a4") {
-  const inner = renderPage(style, content, opts(env, qrUrl), index);
+  const look = content?.trend_look && LOOK_SWAP[style] ? content.trend_look : null;
+  const inner = applyLook(renderPage(style, content, opts(env, qrUrl), index), style, look);
   const bg = STYLES[style].bg;
-  const head = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><link rel="stylesheet" href="${fontsHref(style)}">`;
+  const lookFont = look?.display_font ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(look.display_font).replace(/%20/g, "+")}:wght@${look.display_font === "Space Grotesk" ? "400;600;700" : "400;600;700;800"}&display=swap">` : "";
+  const head = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><link rel="stylesheet" href="${fontsHref(style)}">${lookFont}`;
   if (mode === "story") {
     // 9:16 frame (540×960 CSS px, rendered at 2× = 1080×1920) with the A4 page centred
     const s = (540 * 0.94) / A4W;

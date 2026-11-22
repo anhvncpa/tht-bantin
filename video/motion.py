@@ -79,12 +79,19 @@ SFX_VOL_VOICE = 0.6   # có giọng đọc → hiệu ứng nhỏ lại để kh
 ENERGETIC = ("kich-tinh", "hien-dai", "soi-dong", "upbeat")
 
 
-def pick_music(music_dir, rng=None):
-    """Ưu tiên nhạc sôi động: thư mục music/upbeat/ (nếu có) → các bài kich-tinh-*, hien-dai-* → bài bất kỳ."""
+def pick_music(music_dir, rng=None, mood=""):
+    """mood (agent xu hướng chọn): du-duong / hien-dai / hoi-hop / kich-tinh / upbeat → lấy bài cùng tâm trạng.
+    Không có mood: ưu tiên nhạc sôi động: music/upbeat/ → kich-tinh-*, hien-dai-* → bài bất kỳ."""
     import random
     rng = rng or random
     music_dir = Path(music_dir)
     ext = (".mp3", ".m4a", ".aac", ".wav")
+    if mood:
+        cand = [p for p in music_dir.glob("*") if p.suffix.lower() in ext and p.name.startswith(mood)]
+        if (music_dir / mood).is_dir():
+            cand += [p for p in (music_dir / mood).glob("*") if p.suffix.lower() in ext]
+        if cand:
+            return rng.choice(cand)
     up = [p for p in (music_dir / "upbeat").glob("*") if p.suffix.lower() in ext] if (music_dir / "upbeat").exists() else []
     allt = [p for p in music_dir.glob("*") if p.suffix.lower() in ext]
     hot = [p for p in allt if p.name.startswith(ENERGETIC)]
@@ -163,6 +170,7 @@ def from_content(c, phone="0901 144 078", website="thtaudit.com.vn"):
         }
     return {
         "theme": c.get("theme") or STYLE_THEME.get(str(c.get("style", "")), "gold"),
+        "palette": c.get("palette") or None,
         "hook": c.get("story_hook") or c.get("title_question") or "",
         "title1": c.get("title_line1", ""), "title2": c.get("title_line2", ""), "topic": c.get("topic_short", ""),
         "doc_ref": c.get("doc_ref", ""), "hl": c.get("highlight") or None,

@@ -114,7 +114,9 @@ const CTX = document.getElementById("fx").getContext("2d");
 const SYM = (mono) => `<svg viewBox="0 0 561 498"><path fill="${mono || "#F7A933"}" fill-rule="evenodd" d="M0 0H561V498H0Z M73 54V444H488V54Z"/><rect fill="${mono || "#F7A933"}" x="72" y="222" width="417" height="54"/><rect fill="${mono || "#009A57"}" x="244" y="53" width="73" height="170"/><rect fill="${mono || "#E0242B"}" x="244" y="275" width="73" height="170"/>${mono ? "" : '<polygon fill="#009A57" points="0,0 561,0 488,54 73,54"/><polygon fill="#E0242B" points="0,498 561,498 488,444 73,444"/>'}</svg>`;
 
 window.setup = function (data) {
-  D = data; TH = THEMES[data.theme] || THEMES.gold; CUES = [];
+  D = data; CUES = [];
+  // Phong cách xu hướng tuần (agent xu hướng): màu nhấn lấy từ bảng màu tuần, nhịp cảnh như mẫu gold
+  TH = data.theme === "trend" && data.palette ? { acc: { D: data.palette.D || "#F7A933", L: data.palette.L || "#23272D" }, mark: false, seq: THEMES.gold.seq } : THEMES[data.theme] || THEMES.gold;
   if (data.brand_label) document.getElementById("brandtxt").textContent = data.brand_label;
   const root = document.getElementById("scenes"); root.innerHTML = ""; SC = [];
   let ptIdx = 0;

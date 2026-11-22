@@ -29,6 +29,9 @@ export const creatorInfo = (token) => tt(token, "/post/publish/creator_info/quer
 
 // App đã qua kiểm duyệt khi tài khoản được chọn "Mọi người" (cache 6 giờ)
 export async function tiktokAudited(env, deps) {
+  // Không tự dò nữa: tài khoản công khai vẫn trả về PUBLIC_TO_EVERYONE dù app CHƯA qua kiểm duyệt
+  // → bot tưởng đã duyệt, bỏ TikTok khỏi luồng tự đăng. Chỉ bật khi TikTok gửi email duyệt app: TIKTOK_AUDITED = "1".
+  if (env.TIKTOK_AUDITED !== "1") return false;
   const c = await deps.kvGet(env, "tt:audited");
   if (c) { const [v, at] = c.split("|"); if (Date.now() - Number(at) < 6 * 3600e3) return v === "1"; }
   let ok = false;

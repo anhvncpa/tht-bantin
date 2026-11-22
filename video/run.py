@@ -280,7 +280,7 @@ def main():
         # Video chữ chuyển động (motion graphics) – lỗi thì tự lùi về kiểu lướt poster
         try:
             from motion import render_motion, from_content, pick_music
-            track = pick_music(MUSIC_DIR)
+            track = pick_music(MUSIC_DIR, mood=man.get("music_mood") or "")
             mdata = from_content(man["motion_content"], man.get("tht_phone", "0901 144 078"), man.get("tht_website", "thtaudit.com.vn"))
             secs = render_motion(mdata, out, track, voice=man.get("voice", True) and os.environ.get("VOICE", "0") == "1")  # tạm tắt giọng đọc; bật lại: thêm VOICE: "1" vào env của video.yml
             music, kind = (track.name if track else None), "motion"
