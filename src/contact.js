@@ -11,7 +11,13 @@ export const FB_FOOTER = [
   `📍 ${DN.short}: ☎ ${DN.phone} · ✉ ${DN.email}`,
 ].join("\n");
 
-const CONTACT_LINE = /(0901|3517|8796|144\s?078|tht@thtaudit|danang@thtaudit|📞|📧|☎|✉|hotline|THT sẵn sàng|sẵn sàng hỗ trợ|quét (mã )?QR|quét QR)/i;
+const CONTACT_LINE = /(zalo\.me\/g\/|0901|3517|8796|144\s?078|tht@thtaudit|danang@thtaudit|📞|📧|☎|✉|hotline|THT sẵn sàng|sẵn sàng hỗ trợ|quét (mã )?QR|quét QR)/i;
+
+// Nhóm Zalo cộng đồng THT Audit – gắn vào bài Facebook/Instagram/Threads và bình luận đầu tiên.
+// Đổi link: biến ZALO_GROUP_URL trên Cloudflare; tắt: ZALO_GROUP_URL = "0".
+export const ZALO_GROUP_URL = "https://zalo.me/g/rrbxhd580";
+export const zaloUrl = (env = {}) => (env.ZALO_GROUP_URL === "0" ? "" : env.ZALO_GROUP_URL || ZALO_GROUP_URL);
+export const zaloLine = (env = {}) => (zaloUrl(env) ? `👥 Tham gia nhóm Zalo cộng đồng THT Audit để nắm thêm thông tin thuế – kế toán và hỏi đáp: ${zaloUrl(env)}` : "");
 
 // Bỏ mọi dòng liên hệ/lời mời do AI tự viết, chèn chân liên hệ chuẩn trước dòng hashtag.
 export function withFbFooter(caption) {
@@ -42,7 +48,7 @@ export function fbCaption(content, env = {}) {
   const en = bilingual ? splitTags(enText) : null;
   const sh = content?.share;
   const credit = sh?.url ? ["", sh.source ? `🎬 Xem video gốc của ${sh.source}: ${sh.url}` : `🎬 Xem video gốc: ${sh.url}`] : [];
-  return [vi.body, ...credit, ...(en && en.body ? ["", "🇬🇧 English below", "", en.body] : []), "", FB_FOOTER, ...(vi.tags.length ? ["", ...vi.tags] : [])].join("\n").trim();
+  return [vi.body, ...credit, ...(en && en.body ? ["", "🇬🇧 English below", "", en.body] : []), "", FB_FOOTER, ...(zaloLine(env) ? ["", zaloLine(env)] : []), ...(vi.tags.length ? ["", ...vi.tags] : [])].join("\n").trim();
 }
 
 // Câu liên hệ cuối thư tư vấn (4 ngôn ngữ), hai văn phòng ngang nhau
