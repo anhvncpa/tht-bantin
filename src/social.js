@@ -1,6 +1,7 @@
 // Đăng đa kênh ngoài Facebook: Instagram (ảnh/carousel), Threads (chữ + ảnh poster).
 // Instagram Reels / Facebook Reels đăng từ luồng video (video/run.py) vì cần file video vừa dựng.
 // Ảnh/video được Meta tải về qua link công khai có chữ ký: /m/<jobId>/<file>?s=<hmac>
+import { zaloUrl } from "./contact.js";
 import { claude, modelFor } from "./claude.js";
 import { screenshot, pageDocument } from "./render.js";
 
@@ -161,10 +162,20 @@ export async function threadsText(env, content) {
   return text;
 }
 
+// Gắn link nhóm Zalo cuối bài Threads, giữ tổng ≤ 500 ký tự (giới hạn của Threads)
+function withZalo(text, env) {
+  const url = zaloUrl(env);
+  if (!url || String(text).includes(url)) return text;
+  const tail = `\n\n👥 Nhóm Zalo THT Audit: ${url}`;
+  let body = String(text || "").trim();
+  if (body.length + tail.length > 500) body = body.slice(0, 500 - tail.length - 1).replace(/\s+\S*$/, "") + "…";
+  return body + tail;
+}
+
 export async function postThreads(env, job, kvGet, kvSet) {
   const t = await threadsToken(env, kvGet, kvSet);
   if (!t) throw new Error("Chưa kết nối Threads (mở /threads/login?key=...)");
-  const text = await threadsText(env, job.content);
+  const text = withZalo(await threadsText(env, job.content), env);
   const params = { access_token: t.access_token, text };
   if (job.render?.pages?.length) { params.media_type = "IMAGE"; params.image_url = await mediaUrl(env, job.id, "page1.png"); }
   else params.media_type = "TEXT";
