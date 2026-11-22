@@ -7,7 +7,7 @@ import { postToPage, postLink } from "./facebook.js";
 import { tg, send, keyboard, download, sendAlbum, sendVideo } from "./telegram.js";
 import { sendLetter, LETTER_KINDS } from "./word.js";
 import { withFbFooter, fbCaption, FB_FOOTER } from "./contact.js";
-import { withSeries, firstComment, trackPost, pollComments, replyButton, takeQuestions, shareKit } from "./engage.js";
+import { withSeries, firstComment, trackPost, pollComments, replyButton, takeQuestions, shareKit, flushReplies } from "./engage.js";
 import { scout, itemSource, nextSlots, vnLabel } from "./agent.js";
 import { planWeek, ideaSource, weeklyInsights, PILLARS } from "./growth.js";
 import { healPlan, healMessage, videoRunStatus } from "./healer.js";
@@ -844,7 +844,7 @@ async function scheduleList(env) {
 async function runDue(env) {
   try { await retryLetterSync(env); } catch (e) { console.log("letter sync", e.message); }
   try { await runAudit(env); } catch (e) { console.log("audit", e.message); }
-  try { if (agentChat(env)) await pollComments(env, engDeps(env)); } catch (e) { console.log("engage", e.message); }
+  try { if (agentChat(env)) { await flushReplies(env, engDeps(env)); await pollComments(env, engDeps(env)); } } catch (e) { console.log("engage", e.message); }
   const rows = (await env.DB.prepare("SELECT k, v FROM kv WHERE k LIKE 'sched:%'").all()).results || [];
   for (const r of rows) {
     const it = JSON.parse(r.v);
