@@ -1,0 +1,137 @@
+// Agent tương tác fanpage (tăng like/theo dõi, tiết kiệm API Claude):
+// 1) Chuyên mục cố định: "Thuế 60 giây" thứ 2-4-6, "Hỏi đáp thứ 7" – chỉ thêm 1 dòng vào bài, không gọi Claude.
+// 2) Bình luận đầu tiên do trang viết ngay sau khi đăng: câu hỏi mở + link tư vấn (link để ở bình luận, không để trong bài) – không gọi Claude.
+// 3) Cẩm nang Giám đốc: ai bình luận "CẨM NANG" → trang tự trả lời kèm link PDF (mẫu cố định, không gọi Claude).
+// 4) Bình luận khác: soạn sẵn câu trả lời bằng model rẻ (Haiku), gửi Telegram để anh bấm duyệt mới đăng.
+//    Bình luận ngắn/biểu tượng cảm xúc → dùng mẫu cảm ơn, không gọi Claude. Giới hạn ENGAGE_MAX_DRAFTS bản nháp/ngày (mặc định 12).
+// 5) Câu hỏi trong bình luận (có dấu "?") được gom lại cho bài "Hỏi đáp thứ 7".
+// Cần token Facebook có quyền pages_manage_engagement + pages_read_user_content. Thiếu quyền thì bỏ qua êm, không làm hỏng việc đăng bài.
+import { claude, modelFor } from "./claude.js";
+import { pageToken } from "./facebook.js";
+
+const graph = (env) => `https://graph.facebook.com/${env.FB_GRAPH_VERSION || "v26.0"}`;
+const VN = 7 * 3600e3;
+const vnDay = () => new Date(Date.now() + VN).getUTCDay();   // 0 = Chủ nhật
+const dayKey = () => new Date(Date.now() + VN).toISOString().slice(0, 10);
+const FORM = (env) => env.DEFAULT_QR_URL || "https://form.thtaudit.com.vn/";
+
+// ---------- 1) Chuyên mục cố định ----------
+export function seriesLine(env) {
+  if (env.ENGAGE_SERIES === "0") return null;
+  const d = vnDay();
+  if ([1, 3, 5].includes(d)) return { line: "⏱ Chuyên mục THUẾ 60 GIÂY – thứ 2, 4, 6 hằng tuần trên THT Audit", tag: "#Thue60Giay" };
+  if (d === 6) return { line: "💬 HỎI ĐÁP THỨ 7 – để lại câu hỏi ở bình luận, THT trả lời trong số Hỏi đáp tuần sau", tag: "#HoiDapThuBay" };
+  return { line: "💬 Có câu hỏi về thuế – kế toán? Để lại bình luận, THT trả lời miễn phí", tag: "" };
+}
+// Chèn dòng chuyên mục ngay trên phần liên hệ, thêm hashtag chuyên mục
+export function withSeries(caption, env, footer) {
+  const s = seriesLine(env);
+  if (!s || !caption) return caption;
+  let out = footer && caption.includes(footer) ? caption.replace(footer, `${s.line}\n\n${footer}`) : `${caption}\n\n${s.line}`;
+  if (s.tag && !out.includes(s.tag)) {
+    const lines = out.split("\n");
+    if (/^\s*#\S+/.test(lines[lines.length - 1] || "")) lines[lines.length - 1] += ` ${s.tag}`;
+    else lines.push("", s.tag);
+    out = lines.join("\n");
+  }
+  return out;
+}
+
+// ---------- 2) Bình luận đầu tiên ----------
+const postIdOf = (url) => String(url || "").replace(/\/+$/, "").split("/").pop();
+async function fbComment(env, targetId, message) {
+  const form = new URLSearchParams({ message, access_token: await pageToken(env) });
+  const r = await (await fetch(`${graph(env)}/${targetId}/comments`, { method: "POST", body: form })).json();
+  if (!r.id) throw new Error(r.error?.message || "không bình luận được");
+  return r.id;
+}
+export async function firstComment(env, postUrl, caption, extra = "") {
+  if (env.ENGAGE_ENABLED === "0" || env.DRY_RUN === "1") return null;
+  const q = String(caption || "").split("\n").map((l) => l.trim()).filter((l) => /\?$/.test(l) && l.length < 160).pop()
+    || "Doanh nghiệp của anh/chị đã áp dụng điểm này chưa? Có vướng mắc gì cứ để lại bình luận nhé.";
+  const msg = [`💬 ${q}`, extra, `👉 Đăng ký tư vấn miễn phí: ${FORM(env)}`, "🔔 Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày."].filter(Boolean).join("\n");
+  try { return await fbComment(env, postIdOf(postUrl), msg); } catch (e) { console.log("firstComment", e.message); return null; }
+}
+
+// ---------- Theo dõi bài vừa đăng (7 ngày) ----------
+export async function trackPost(env, kv, post) {
+  const list = JSON.parse((await kv.get(env, "eng:posts")) || "[]").filter((p) => Date.now() - p.at < 7 * 86400e3 && p.id !== post.id);
+  list.unshift({ ...post, at: Date.now() });
+  await kv.set(env, "eng:posts", JSON.stringify(list.slice(0, 20)));
+}
+
+// ---------- 4) Soạn câu trả lời ----------
+const TRIVIAL = (t) => { const s = String(t || "").replace(/[\p{Emoji}\s.!]+/gu, " ").trim(); return !s || s.split(/\s+/).length <= 3; };
+async function draftReply(env, comment, title) {
+  if (TRIVIAL(comment.message)) return `Cảm ơn ${comment.from?.name ? comment.from.name.split(" ").pop() : "anh/chị"} đã quan tâm ❤️ Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày nhé!`;
+  const msg = await claude(env, { model: modelFor(env, "cheap"), max_tokens: 300,
+    system: "Bạn trả lời bình luận trên fanpage THT Audit (Công ty Kiểm toán & Tư vấn THT) bằng tiếng Việt, xưng THT, gọi anh/chị. Tối đa 3 câu, thân thiện, chính xác; không khẳng định con số/văn bản nếu không chắc. Câu hỏi cần xem hồ sơ cụ thể thì mời nhắn tin trang hoặc gọi 0901 144 078. Không dùng hashtag. Chỉ trả về nội dung câu trả lời.",
+    messages: [{ role: "user", content: `Bài viết: ${title}\nBình luận của ${comment.from?.name || "người xem"}: ${comment.message}` }] });
+  return msg.content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+}
+
+// ---------- Quét bình luận mới (gọi từ cron 15 phút, tự giãn 30 phút/lần) ----------
+// deps: { kv:{get,set,del}, send(chat, text, extra), keyboard(rows), chat, mediaUrl(id,file) }
+export async function pollComments(env, deps) {
+  if (env.ENGAGE_ENABLED === "0" || !env.FB_PAGE_ID) return;
+  const { kv } = deps;
+  const last = Number((await kv.get(env, "eng:last")) || 0);
+  if (Date.now() - last < 28 * 60e3) return;
+  await kv.set(env, "eng:last", String(Date.now()));
+  const posts = JSON.parse((await kv.get(env, "eng:posts")) || "[]");
+  if (!posts.length) return;
+  const tok = await pageToken(env);
+  const seen = new Set(JSON.parse((await kv.get(env, "eng:seen")) || "[]"));
+  const qs = JSON.parse((await kv.get(env, "eng:questions")) || "[]");
+  const day = dayKey();
+  let used = Number((await kv.get(env, `eng:drafts:${day}`)) || 0);
+  const max = Number(env.ENGAGE_MAX_DRAFTS || 12);
+  for (const p of posts) {
+    let j;
+    try { j = await (await fetch(`${graph(env)}/${p.id}/comments?fields=id,message,from{id,name},created_time&order=reverse_chronological&limit=25&access_token=${encodeURIComponent(tok)}`)).json(); } catch (_) { continue; }
+    if (j.error) { if (!(await kv.get(env, "eng:permwarn"))) { await kv.set(env, "eng:permwarn", "1"); await deps.send(deps.chat, `⚠️ Agent tương tác chưa đọc được bình luận Facebook (${j.error.message?.slice(0, 120)}). Cần token có quyền pages_read_user_content + pages_manage_engagement.`); } return; }
+    for (const c of j.data || []) {
+      if (seen.has(c.id) || !c.message || c.from?.id === env.FB_PAGE_ID) { seen.add(c.id); continue; }
+      seen.add(c.id);
+      // Cẩm nang: trả lời tự động kèm link PDF
+      if (p.kind === "handbook" && /c[aẩâ]m\s*nang/i.test(c.message) && p.pdf) {
+        try { await fbComment(env, c.id, `THT gửi ${c.from?.name ? c.from.name.split(" ").pop() : "anh/chị"} bản PDF Cẩm nang Giám đốc: ${p.pdf}\nCần tư vấn cho doanh nghiệp mình: ${FORM(env)} hoặc 0901 144 078.`); } catch (e) { console.log("hb reply", e.message); }
+        continue;
+      }
+      if (/\?/.test(c.message) && c.message.length > 15) qs.unshift({ q: c.message.slice(0, 300), post: p.title, at: Date.now() });
+      if (used >= max) continue;
+      let text;
+      try { text = await draftReply(env, c, p.title); } catch (e) { console.log("draftReply", e.message); continue; }
+      used++;
+      await kv.set(env, `rep:${c.id}`, JSON.stringify({ id: c.id, text, name: c.from?.name || "", msg: c.message.slice(0, 500), post: p.title }));
+      await deps.send(deps.chat, `💬 Bình luận mới · “${p.title.slice(0, 60)}”\n${c.from?.name || "Người xem"}: ${c.message.slice(0, 400)}\n\n✍️ Đề xuất trả lời:\n${text}`,
+        deps.keyboard([[["✅ Đăng trả lời", `rp:${c.id}:ok`], ["✏️ Sửa", `rp:${c.id}:ed`], ["❌ Bỏ qua", `rp:${c.id}:x`]]]));
+    }
+  }
+  await kv.set(env, "eng:seen", JSON.stringify([...seen].slice(-800)));
+  await kv.set(env, "eng:questions", JSON.stringify(qs.filter((x) => Date.now() - x.at < 14 * 86400e3).slice(0, 20)));
+  await kv.set(env, `eng:drafts:${day}`, String(used));
+}
+
+// Nút duyệt trả lời: ok = đăng nguyên văn, ed = anh nhắn câu khác, x = bỏ
+export async function replyButton(env, deps, commentId, arg, customText) {
+  const raw = await deps.kv.get(env, `rep:${commentId}`);
+  if (!raw) return deps.send(deps.chat, "Bản nháp trả lời này đã xử lý hoặc hết hạn.");
+  const r = JSON.parse(raw);
+  if (arg === "x") { await deps.kv.del(env, `rep:${commentId}`); return deps.send(deps.chat, "Đã bỏ qua bình luận này."); }
+  const text = customText || r.text;
+  try {
+    await fbComment(env, commentId, text);
+    await deps.kv.del(env, `rep:${commentId}`);
+    return deps.send(deps.chat, `✅ Đã trả lời ${r.name || "bình luận"} trên Facebook.`);
+  } catch (e) { return deps.send(deps.chat, `❌ Chưa trả lời được: ${e.message}`); }
+}
+
+// ---------- 5) Hỏi đáp thứ 7: lấy câu hỏi đã gom ----------
+export async function takeQuestions(env, kv, n = 3) {
+  const qs = JSON.parse((await kv.get(env, "eng:questions")) || "[]");
+  if (!qs.length) return [];
+  const pick = qs.slice(0, n);
+  await kv.set(env, "eng:questions", JSON.stringify(qs.slice(n)));
+  return pick;
+}
