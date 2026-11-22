@@ -7,7 +7,7 @@ import { postToPage, postLink } from "./facebook.js";
 import { tg, send, keyboard, download, sendAlbum, sendVideo } from "./telegram.js";
 import { sendLetter, LETTER_KINDS } from "./word.js";
 import { withFbFooter, fbCaption, FB_FOOTER } from "./contact.js";
-import { withSeries, firstComment, trackPost, pollComments, replyButton, takeQuestions } from "./engage.js";
+import { withSeries, firstComment, trackPost, pollComments, replyButton, takeQuestions, shareKit } from "./engage.js";
 import { scout, itemSource, nextSlots, vnLabel } from "./agent.js";
 import { planWeek, ideaSource, weeklyInsights, PILLARS } from "./growth.js";
 import { healPlan, healMessage, videoRunStatus } from "./healer.js";
@@ -540,6 +540,8 @@ async function afterFbPost(env, url, caption, title, extra = {}) {
   try {
     await firstComment(env, url, caption, extra.comment || "");
     await trackPost(env, ENG_KV, { id: String(url).replace(/\/+$/, "").split("/").pop(), title, kind: extra.kind || "post", pdf: extra.pdf || "" });
+    const kit = shareKit(env, url, caption, title);
+    if (kit && agentChat(env)) await send(env, agentChat(env), kit, { parse_mode: "HTML", disable_web_page_preview: true });
   } catch (e) { console.log("afterFbPost", e.message); }
 }
 const engDeps = (env) => ({ kv: ENG_KV, chat: agentChat(env), send: (chat, text, extra) => send(env, chat, text, extra), keyboard });
