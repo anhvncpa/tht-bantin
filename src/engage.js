@@ -135,3 +135,23 @@ export async function takeQuestions(env, kv, n = 3) {
   await kv.set(env, "eng:questions", JSON.stringify(qs.slice(n)));
   return pick;
 }
+
+// ---------- 6) Bộ chia sẻ sau mỗi bài (cho anh và nhân viên lan toả thủ công – Facebook không cho tự động mời like/đăng nhóm) ----------
+// Mẫu cố định từ tiêu đề + đoạn mở bài, không gọi Claude. Gửi vào nhóm Telegram dạng chạm-để-copy.
+const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export function shareKit(env, url, caption, title) {
+  if (env.ENGAGE_SHAREKIT === "0" || !url) return null;
+  const body = String(caption || "").split("\n").map((l) => l.trim()).filter((l) => l && !/^[#📍⏱💬🇬🇧]/u.test(l) && !/english below/i.test(l));
+  const lead = body.slice(1, 3).join("\n");
+  const t = title || body[0] || "Tin thuế – kế toán mới";
+  const staff = `📌 ${t}\nTin hữu ích từ THT Audit – anh chị làm kế toán, chủ doanh nghiệp nên lưu lại nhé 👇\n${url}`;
+  const group = `${t}\n${lead}\n\nAi cần thêm chi tiết có thể xem bài đầy đủ tại THT Audit: ${url}`;
+  const zalo = `THT kính gửi Quý khách tin mới: ${t}.\nChi tiết: ${url}\nQuý khách theo dõi fanpage THT Audit để nhận tin thuế – kế toán mỗi ngày.`;
+  return [
+    "📣 <b>Bộ lan toả bài mới</b> – chạm vào khung để copy",
+    "", "1️⃣ <b>Nhân viên chia sẻ về trang cá nhân</b> (trong 30 phút đầu):", `<code>${esc(staff)}</code>`,
+    "", "2️⃣ <b>Đăng vào nhóm kế toán – thuế</b> (2–3 nhóm, sửa vài chữ cho khác nhau, đúng nội quy nhóm):", `<code>${esc(group)}</code>`,
+    "", "3️⃣ <b>Gửi nhóm Zalo khách hàng</b> (chọn bài thật hữu ích, tối đa 2 bài/tuần):", `<code>${esc(zalo)}</code>`,
+    "", `4️⃣ Tối nay mở bài → bấm vào số lượt cảm xúc → bấm <b>Mời</b> với người chưa thích trang: ${esc(url)}`,
+  ].join("\n");
+}
