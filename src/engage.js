@@ -2,7 +2,8 @@
 // 1) Chuyên mục cố định: "Thuế 60 giây" thứ 2-4-6, "Hỏi đáp thứ 7" – chỉ thêm 1 dòng vào bài, không gọi Claude.
 // 2) Bình luận đầu tiên do trang viết ngay sau khi đăng: câu hỏi mở + link tư vấn (link để ở bình luận, không để trong bài) – không gọi Claude.
 // 3) Cẩm nang Giám đốc: ai bình luận "CẨM NANG" → trang tự trả lời kèm link PDF (mẫu cố định, không gọi Claude).
-// 4) Bình luận khác: soạn sẵn câu trả lời bằng model rẻ (Haiku), gửi Telegram để anh bấm duyệt mới đăng.
+// 4) Bình luận khác: soạn câu trả lời bằng model rẻ (Haiku). Mặc định TỰ ĐĂNG sau ENGAGE_REPLY_DELAY phút (10) –
+//    trong thời gian đó anh có thể bấm Sửa / Không trả lời trên Telegram. ENGAGE_AUTO_REPLY="0" → chỉ đăng khi anh bấm duyệt.
 //    Bình luận ngắn/biểu tượng cảm xúc → dùng mẫu cảm ơn, không gọi Claude. Giới hạn ENGAGE_MAX_DRAFTS bản nháp/ngày (mặc định 12).
 // 5) Câu hỏi trong bình luận (có dấu "?") được gom lại cho bài "Hỏi đáp thứ 7".
 // Cần token Facebook có quyền pages_manage_engagement + pages_read_user_content. Thiếu quyền thì bỏ qua êm, không làm hỏng việc đăng bài.
@@ -104,8 +105,11 @@ export async function pollComments(env, deps) {
       try { text = await draftReply(env, c, p.title); } catch (e) { console.log("draftReply", e.message); continue; }
       used++;
       await kv.set(env, `rep:${c.id}`, JSON.stringify({ id: c.id, text, name: c.from?.name || "", msg: c.message.slice(0, 500), post: p.title }));
-      await deps.send(deps.chat, `💬 Bình luận mới · “${p.title.slice(0, 60)}”\n${c.from?.name || "Người xem"}: ${c.message.slice(0, 400)}\n\n✍️ Đề xuất trả lời:\n${text}`,
-        deps.keyboard([[["✅ Đăng trả lời", `rp:${c.id}:ok`], ["✏️ Sửa", `rp:${c.id}:ed`], ["❌ Bỏ qua", `rp:${c.id}:x`]]]));
+      const auto = env.ENGAGE_AUTO_REPLY !== "0";
+      const delay = Number(env.ENGAGE_REPLY_DELAY || 10);
+      if (auto) { const pend = JSON.parse((await kv.get(env, "eng:pending")) || "[]"); pend.push({ id: c.id, due: Date.now() + delay * 60e3 }); await kv.set(env, "eng:pending", JSON.stringify(pend)); }
+      await deps.send(deps.chat, `💬 Bình luận mới · “${p.title.slice(0, 60)}”\n${c.from?.name || "Người xem"}: ${c.message.slice(0, 400)}\n\n✍️ ${auto ? `Trả lời sẽ TỰ ĐĂNG sau ${delay} phút` : "Đề xuất trả lời"}:\n${text}`,
+        deps.keyboard([[["✅ Đăng ngay", `rp:${c.id}:ok`], ["✏️ Sửa", `rp:${c.id}:ed`], ["❌ Không trả lời", `rp:${c.id}:x`]]]));
     }
   }
   await kv.set(env, "eng:seen", JSON.stringify([...seen].slice(-800)));
@@ -113,8 +117,27 @@ export async function pollComments(env, deps) {
   await kv.set(env, `eng:drafts:${day}`, String(used));
 }
 
-// Nút duyệt trả lời: ok = đăng nguyên văn, ed = anh nhắn câu khác, x = bỏ
+// Đăng các câu trả lời đã hết thời gian chờ (gọi mỗi lần cron 15 phút)
+export async function flushReplies(env, deps) {
+  if (env.ENGAGE_AUTO_REPLY === "0") return;
+  const pend = JSON.parse((await deps.kv.get(env, "eng:pending")) || "[]");
+  if (!pend.length) return;
+  const keep = [];
+  for (const it of pend) {
+    if (it.due > Date.now()) { keep.push(it); continue; }
+    const raw = await deps.kv.get(env, `rep:${it.id}`);
+    if (!raw) continue;
+    const r = JSON.parse(raw);
+    try { await fbComment(env, it.id, r.text); await deps.kv.del(env, `rep:${it.id}`); await deps.send(deps.chat, `✅ Đã tự trả lời ${r.name || "bình luận"}: “${r.text.slice(0, 80)}…”`); }
+    catch (e) { await deps.kv.del(env, `rep:${it.id}`); await deps.send(deps.chat, `❌ Chưa tự trả lời được ${r.name || "bình luận"}: ${e.message}`); }
+  }
+  await deps.kv.set(env, "eng:pending", JSON.stringify(keep));
+}
+const unpend = async (env, kv, id) => { const p = JSON.parse((await kv.get(env, "eng:pending")) || "[]"); await kv.set(env, "eng:pending", JSON.stringify(p.filter((x) => x.id !== id))); };
+
+// Nút trả lời: ok = đăng ngay, ed = anh nhắn câu khác, x = không trả lời
 export async function replyButton(env, deps, commentId, arg, customText) {
+  if (arg !== "ed") await unpend(env, deps.kv, commentId);
   const raw = await deps.kv.get(env, `rep:${commentId}`);
   if (!raw) return deps.send(deps.chat, "Bản nháp trả lời này đã xử lý hoặc hết hạn.");
   const r = JSON.parse(raw);
@@ -149,9 +172,9 @@ export function shareKit(env, url, caption, title) {
   const zalo = `THT kính gửi Quý khách tin mới: ${t}.\nChi tiết: ${url}\nQuý khách theo dõi fanpage THT Audit để nhận tin thuế – kế toán mỗi ngày.`;
   return [
     "📣 <b>Bộ lan toả bài mới</b> – chạm vào khung để copy",
-    "", "1️⃣ <b>Nhân viên chia sẻ về trang cá nhân</b> (trong 30 phút đầu):", `<code>${esc(staff)}</code>`,
-    "", "2️⃣ <b>Đăng vào nhóm kế toán – thuế</b> (2–3 nhóm, sửa vài chữ cho khác nhau, đúng nội quy nhóm):", `<code>${esc(group)}</code>`,
-    "", "3️⃣ <b>Gửi nhóm Zalo khách hàng</b> (chọn bài thật hữu ích, tối đa 2 bài/tuần):", `<code>${esc(zalo)}</code>`,
+    "", "1️⃣ <b>Đăng vào 1–2 nhóm kế toán – thuế</b> (Facebook không cho phần mềm tự đăng vào nhóm):", `<code>${esc(group)}</code>`,
+    "", "2️⃣ <b>Chia sẻ về trang cá nhân của anh</b> (tuỳ chọn):", `<code>${esc(staff)}</code>`,
+    "", "3️⃣ <b>Gửi nhóm Zalo khách hàng</b> (tối đa 2 bài/tuần):", `<code>${esc(zalo)}</code>`,
     "", `4️⃣ Tối nay mở bài → bấm vào số lượt cảm xúc → bấm <b>Mời</b> với người chưa thích trang: ${esc(url)}`,
   ].join("\n");
 }
