@@ -6,7 +6,8 @@ import { renderJob, STYLE_NAMES } from "./render.js";
 import { postToPage, postLink } from "./facebook.js";
 import { tg, send, keyboard, download, sendAlbum, sendVideo } from "./telegram.js";
 import { sendLetter, LETTER_KINDS } from "./word.js";
-import { withFbFooter, fbCaption } from "./contact.js";
+import { withFbFooter, fbCaption, FB_FOOTER } from "./contact.js";
+import { withSeries, firstComment, trackPost, pollComments, replyButton, takeQuestions } from "./engage.js";
 import { scout, itemSource, nextSlots, vnLabel } from "./agent.js";
 import { planWeek, ideaSource, weeklyInsights, PILLARS } from "./growth.js";
 import { healPlan, healMessage, videoRunStatus } from "./healer.js";
@@ -250,6 +251,8 @@ export async function handleUpdate(update, env) {
       return env.JOBS.send({ type: "advise", chat, q });
     }
     if (await kvGet(env, hbAskKey(chat, uid))) { await kvDel(env, hbAskKey(chat, uid)); return startHandbook(env, chat, m.text.trim()); }
+    const rpEdit = await kvGet(env, `rpedit:${chat}:${uid}`);
+    if (rpEdit) { await kvDel(env, `rpedit:${chat}:${uid}`); return replyButton(env, { ...engDeps(env), chat }, rpEdit, "ok", m.text.trim()); }
     const hbFix = await kvGet(env, hbFixKey(chat, uid));
     if (hbFix) {
       await kvDel(env, hbFixKey(chat, uid));
@@ -301,6 +304,11 @@ async function onButton(q, env) {
   if (act === "ip") return pickIdeas(env, chat, q, arg);
   if (act === "av") return onAdviceButton(env, chat, uid, q, id, arg);
   if (act === "hb") return onHandbookButton(env, chat, uid, q, id, arg);
+  if (act === "rp") {
+    await tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } });
+    if (arg === "ed") { await kvSet(env, `rpedit:${chat}:${uid}`, id); return send(env, chat, "✏️ Anh nhắn câu trả lời muốn đăng cho bình luận này."); }
+    return replyButton(env, { ...engDeps(env), chat }, id, arg);
+  }
   if (act === "sg") {
     await kvSet(env, "growth:strategy_off", arg === "off" ? "1" : "0");
     return send(env, chat, arg === "off" ? "↩️ Đã tạm không áp dụng điều chỉnh tự động, bot chạy theo cấu hình gốc. Bật lại: bấm nút ✅ ở báo cáo tuần." : "✅ Đã bật lại điều chỉnh tự động theo tự đánh giá tuần.");
@@ -526,6 +534,16 @@ async function renderAndPreview(env, job, lookupRows = 0) {
   await hubEvent(env, { run: job.id, step: "review", status: "waiting", title: "Đã gửi bản xem trước vào Telegram – chờ anh duyệt" });
 }
 
+// Agent tương tác: bình luận đầu tiên (link tư vấn + câu hỏi mở) và theo dõi bình luận 7 ngày – không gọi Claude
+const ENG_KV = { get: (env, k) => kvGet(env, k), set: (env, k, v) => kvSet(env, k, v), del: (env, k) => kvDel(env, k) };
+async function afterFbPost(env, url, caption, title, extra = {}) {
+  try {
+    await firstComment(env, url, caption, extra.comment || "");
+    await trackPost(env, ENG_KV, { id: String(url).replace(/\/+$/, "").split("/").pop(), title, kind: extra.kind || "post", pdf: extra.pdf || "" });
+  } catch (e) { console.log("afterFbPost", e.message); }
+}
+const engDeps = (env) => ({ kv: ENG_KV, chat: agentChat(env), send: (chat, text, extra) => send(env, chat, text, extra), keyboard });
+
 async function publish(env, job, targets) {
   const out = [];
   if (await kvGet(env, `weekly:${job.id}`)) targets = targets.filter((t) => t === "fb");   // tổng hợp tuần: chỉ đăng Facebook
@@ -535,15 +553,19 @@ async function publish(env, job, targets) {
     else {
       try {
         if (job.content.share?.url) {
-          const u = await postLink(env, fbCaption(job.content, env), job.content.share.url);
+          const cap = withSeries(fbCaption(job.content, env), env, FB_FOOTER);
+          const u = await postLink(env, cap, job.content.share.url);
           await markPublished(env, kvGet, kvSet, job.id, u, job.style);
           out.push(`📘 Facebook (chia sẻ video): ${u}`);
+          await afterFbPost(env, u, cap, job.content.title_line1 || job.id);
         } else {
           const imgs = [];
           for (const k of job.render.pages) imgs.push(new Uint8Array(await (await env.FILES.get(k)).arrayBuffer()));
-          const u = await postToPage(env, imgs, fbCaption(job.content, env));
+          const cap = withSeries(fbCaption(job.content, env), env, FB_FOOTER);
+          const u = await postToPage(env, imgs, cap);
           await markPublished(env, kvGet, kvSet, job.id, u, job.style);
           out.push(`📘 Facebook: ${u}`);
+          await afterFbPost(env, u, cap, [job.content.title_line1, job.content.title_line2].filter(Boolean).join(" ") || job.id);
         }
       } catch (e) { out.push(`📘 Facebook lỗi: ${e.message}`); }
     }
@@ -820,6 +842,7 @@ async function scheduleList(env) {
 async function runDue(env) {
   try { await retryLetterSync(env); } catch (e) { console.log("letter sync", e.message); }
   try { await runAudit(env); } catch (e) { console.log("audit", e.message); }
+  try { if (agentChat(env)) await pollComments(env, engDeps(env)); } catch (e) { console.log("engage", e.message); }
   const rows = (await env.DB.prepare("SELECT k, v FROM kv WHERE k LIKE 'sched:%'").all()).results || [];
   for (const r of rows) {
     const it = JSON.parse(r.v);
@@ -1311,6 +1334,7 @@ async function runDaily(env) {
   // 2) bám chỉ tiêu tuần
   if (await kvGet(env, `day:${dayKey()}`)) return hubEvent(env, { run: RUN, step: "pick", status: "done", title: "Hôm nay đã có bài, không chọn thêm" });
   if (env.WEEKLY_DIGEST !== "0" && vnNow().getUTCDay() === 0 && (await runWeeklyDigest(env, chat, RUN))) return;
+  if (env.ENGAGE_QA !== "0" && vnNow().getUTCDay() === 6 && (await runSaturdayQA(env, chat, RUN))) return;
   const st = await getStrategy(env, kvGet);
   const wk = JSON.parse((await kvGet(env, `week:${weekKey()}`)) || '{"fb":0,"video":0}');
   const target = st.weekly_targets || { fb_posts: 7, videos: 4 };
@@ -1364,6 +1388,28 @@ async function runDaily(env) {
   await env.JOBS.send({ type: "generate", jobId: job.id });
 }
 
+
+// ---------------- Hỏi đáp thứ 7: trả lời câu hỏi người xem gửi qua bình luận trong tuần (thay bài thường ngày, không tốn thêm lượt soạn) ----------------
+async function runSaturdayQA(env, chat, RUN) {
+  const qs = await takeQuestions(env, ENG_KV, 3);
+  if (!qs.length) return false;
+  const st = await getStrategy(env, kvGet);
+  const wk = JSON.parse((await kvGet(env, `week:${weekKey()}`)) || '{"fb":0,"video":0}');
+  const target = st.weekly_targets || { fb_posts: 7, videos: 4 };
+  const withVideo = (target.videos || 0) > wk.video;
+  const note = ["HỎI ĐÁP THỨ 7 – THT Audit trả lời câu hỏi người xem gửi qua bình luận tuần này:", ...qs.map((x, i) => `${i + 1}. ${x.q}`), "",
+    "Yêu cầu: tiêu đề dạng 'Hỏi đáp thứ 7: …' nêu câu hỏi đáng chú ý nhất; `points` = từng câu hỏi (tóm gọn) + câu trả lời ngắn có căn cứ pháp lý (số hiệu, điều khoản); không nêu tên người hỏi;",
+    "`facebook_caption` mở đầu bằng 'HỎI ĐÁP THỨ 7', trả lời lần lượt từng câu, cuối bài mời mọi người gửi câu hỏi cho số tuần sau. Kiểm chứng kỹ trước khi trả lời; điểm chưa chắc ghi vào uncertain."].join("\n");
+  const job = { id: crypto.randomUUID().slice(0, 8), chat_id: chat, status: "working", files: [], style: "auto", pages: "auto", quality: "strong", note, created_at: now() };
+  await saveJob(env, job);
+  await tagJob(env, kvSet, job.id, { source: "plan", pillar: "qa", with_video: withVideo, daily: true });
+  await kvSet(env, `day:${dayKey()}`, "1");
+  await kvSet(env, `week:${weekKey()}`, JSON.stringify({ fb: wk.fb + 1, video: wk.video + (withVideo ? 1 : 0) }));
+  await hubEvent(env, { run: RUN, step: "pick", status: "done", title: `Thứ 7: Hỏi đáp ${qs.length} câu hỏi từ bình luận`, detail: qs.map((x, i) => `${i + 1}. ${x.q}`).join("\n") });
+  await send(env, chat, `💬 Hỏi đáp thứ 7 – ${qs.length} câu hỏi từ bình luận tuần này:\n${qs.map((x, i) => `${i + 1}. ${x.q.slice(0, 150)}`).join("\n")}\nEm đang soạn câu trả lời, xong gửi anh duyệt…`);
+  await env.JOBS.send({ type: "generate", jobId: job.id });
+  return true;
+}
 
 // ---------------- Cẩm nang Giám đốc (/chuyende): dàn ý → bản nháp → duyệt → My THT → Facebook ----------------
 const hbGet = async (env, id) => JSON.parse((await kvGet(env, `hb:${id}`)) || "null");
@@ -1449,6 +1495,9 @@ async function runHandbookTask(env, task) {
       if (env.DRY_RUN === "1") return send(env, r.chat, "📘 Chế độ thử: chưa đăng Facebook.");
       const url = await postToPage(env, cards, handbookCaption(doc));
       r.fb = url; await hbSave(env, r);
+      let pdf = "";
+      try { const o = await env.FILES.get(`hb/${r.id}/final/doc.pdf`); if (o) { await env.FILES.put(`jobs/${r.id}/camnang.pdf`, await o.arrayBuffer(), { httpMetadata: { contentType: "application/pdf" } }); pdf = await mediaUrl(env, r.id, "camnang.pdf"); } } catch (e) { console.log("hb pdf link", e.message); }
+      await afterFbPost(env, url, handbookCaption(doc), `Cẩm nang ${r.number}: ${doc.title}`, { kind: "handbook", pdf, comment: pdf ? "📘 Bình luận “CẨM NANG” để nhận bản PDF đầy đủ miễn phí." : "" });
       await hubEvent(env, { run: RUN, step: "publish", status: "done", title: `Đăng Facebook Cẩm nang ${r.number}`, detail: url });
       return send(env, r.chat, `✅ Đã đăng Facebook: ${url}`);
     }
