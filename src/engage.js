@@ -9,6 +9,7 @@
 // Cần token Facebook có quyền pages_manage_engagement + pages_read_user_content. Thiếu quyền thì bỏ qua êm, không làm hỏng việc đăng bài.
 import { claude, modelFor } from "./claude.js";
 import { pageToken } from "./facebook.js";
+import { zaloUrl } from "./contact.js";
 
 const graph = (env) => `https://graph.facebook.com/${env.FB_GRAPH_VERSION || "v26.0"}`;
 const VN = 7 * 3600e3;
@@ -49,7 +50,7 @@ export async function firstComment(env, postUrl, caption, extra = "") {
   if (env.ENGAGE_ENABLED === "0" || env.DRY_RUN === "1") return null;
   const q = String(caption || "").split("\n").map((l) => l.trim()).filter((l) => /\?$/.test(l) && l.length < 160).pop()
     || "Doanh nghiệp của anh/chị đã áp dụng điểm này chưa? Có vướng mắc gì cứ để lại bình luận nhé.";
-  const msg = [`💬 ${q}`, extra, "📞 Cần tư vấn thêm: gọi hoặc nhắn Zalo 0901 144 078", "🔔 Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày."].filter(Boolean).join("\n");
+  const msg = [`💬 ${q}`, extra, "📞 Cần tư vấn thêm: gọi hoặc nhắn Zalo 0901 144 078", zaloUrl(env) ? `👥 Tham gia nhóm Zalo cộng đồng THT Audit để nắm thêm thông tin: ${zaloUrl(env)}` : "", "🔔 Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày."].filter(Boolean).join("\n");
   try { return await fbComment(env, postIdOf(postUrl), msg); } catch (e) { console.log("firstComment", e.message); return null; }
 }
 
