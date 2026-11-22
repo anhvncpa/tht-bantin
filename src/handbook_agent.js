@@ -166,5 +166,5 @@ export const handbookFileName = (d) => `THT_Cam-nang-Giam-doc_${String(d.number 
 
 export function handbookCaption(d) {
   const tags = ["#THTAudit", "#CamNangGiamDoc", `#${String(d.tag || "").replace(/\s+/g, "")}`].filter((t) => t.length > 1).join(" ");
-  return `📘 CẨM NANG GIÁM ĐỐC · SỐ ${d.issue}\n${d.title}\n\n${d.subtitle}\n\n✅ Giám đốc cần nhớ:\n${(d.key_points_short || d.key_points || []).map((k) => `• ${k}`).join("\n")}\n\n📩 Cần bản PDF đầy đủ hoặc tư vấn cho doanh nghiệp của bạn? Nhắn tin cho THT hoặc gửi câu hỏi tại form.thtaudit.com.vn\n\n${tags}`;
+  return `📘 CẨM NANG GIÁM ĐỐC · SỐ ${d.issue}\n${d.title}\n\n${d.subtitle}\n\n✅ Giám đốc cần nhớ:\n${(d.key_points_short || d.key_points || []).map((k) => `• ${k}`).join("\n")}\n\n💬 Bình luận “CẨM NANG” để nhận bản PDF đầy đủ miễn phí. Cần tư vấn cho doanh nghiệp của bạn? Nhắn tin cho THT.\n\n${tags}`;
 }
