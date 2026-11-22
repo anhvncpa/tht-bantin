@@ -4,7 +4,7 @@ import { claude, modelFor } from "./claude.js";
 
 export const VIDEO_DOMAINS = [
   "baochinhphu.vn", "chinhphu.vn", "mof.gov.vn", "gdt.gov.vn", "vtv.vn", "vtv.gov.vn", "vov.vn",
-  "youtube.com", "facebook.com", "vacpa.org.vn", "thoibaotaichinhvietnam.vn",
+  "youtube.com", "facebook.com", "fb.watch", "vacpa.org.vn", "thoibaotaichinhvietnam.vn",
   "quochoi.vn", "tapchitaichinh.vn", "vnanet.vn",
 ];
 
@@ -37,6 +37,9 @@ async function findOnce(env, seen) {
   const system = `Bạn là biên tập viên mạng xã hội của Công ty TNHH Kiểm toán và Tư vấn THT.
 Nhiệm vụ: dùng công cụ tìm kiếm để tìm VIDEO mới (đăng trong ${days} ngày gần đây, tính đến ${today}) về chính sách Thuế, Hóa đơn, Kế toán, Kiểm toán, Lao động – BHXH có ảnh hưởng tới doanh nghiệp nhỏ và vừa, hộ kinh doanh, kế toán.
 Chỉ lấy video của nguồn chính thống, uy tín: Báo Điện tử Chính phủ, Cổng TTĐT Chính phủ, Bộ Tài chính, Cục Thuế, VTV, VOV, Thời báo Tài chính, VACPA (trang web, kênh YouTube hoặc Fanpage chính thức của họ).
+ƯU TIÊN VTV: tìm trước tiên các phóng sự/bản tin của VTV1 (Thời sự 19h, Tài chính kinh doanh, Câu chuyện kinh tế), VTV24 (Fanpage, kênh YouTube, chuyên mục Chuyển động 24h), VTV8 (miền Trung). Video VTV cùng độ hữu ích thì cộng thêm 1 điểm score; source ghi rõ kênh + chương trình, vd "VTV1 – Thời sự 19h", "VTV24 – Chuyển động 24h".
+Không lấy VTV3 và các chương trình giải trí.
+URL: ưu tiên link video trên Fanpage Facebook chính thức (VTV24, Thời sự VTV) hoặc YouTube chính thức (VTV24, Thời sự VTV) để khi THT chia sẻ, video phát ngay trên Facebook; chỉ dùng link trang vtv.vn khi không tìm thấy bản Facebook/YouTube.
 Chỉ báo cáo khi có URL xem video cụ thể; không bịa URL, tiêu đề, ngày. Bỏ video đã có trong danh sách "đã xét".
 Tìm xong gọi video_report đúng một lần (tối đa 4 video, sắp theo score giảm dần).`;
   const tools = [
