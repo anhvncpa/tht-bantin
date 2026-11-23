@@ -318,7 +318,7 @@ def main():
             try: results.append(f"📱 FB Story: {post_fb_story(story_out)}")
             except Exception as e: results.append(f"📱 FB Story lỗi: {e}")
         if "tiktok" in targets:
-            try: results.append(f"🎵 TikTok: {post_tiktok(out, man['tiktok_caption'] or tags, man['tiktok_mode'], man['tiktok_privacy'])}")
+            try: results.append(f"🎵 TikTok: {post_tiktok(out, man.get('tiktok_caption') or tags or man.get('story_hook') or "", man.get('tiktok_mode') or "inbox", man.get('tiktok_privacy') or "SELF_ONLY")}")
             except Exception as e: results.append(f"🎵 TikTok lỗi: {e}")
         if "reels" in targets:
             try: results.append(f"🎞 FB Reels: {post_fb_reel(out, man.get('reels_caption') or man.get('facebook_caption', ''))}")
