@@ -677,7 +677,7 @@ export async function internal(request, env, url) {
     const c = job.content;
     return Response.json({
       id: job.id, dry_run: env.DRY_RUN === "1", stories: job.render.stories, pages: job.render.pages,
-      story_hook: c.story_hook, facebook_caption: fbCaption(c, env), tiktok_caption: c.tiktok_caption,
+      story_hook: c.story_hook, facebook_caption: fbCaption(c, env), tiktok_caption: c.tiktok_caption || [c.story_hook || c.title_line1 || "", (c.hashtags || []).map((t) => (String(t).startsWith("#") ? t : "#" + t)).join(" ")].filter(Boolean).join("\n\n"),
       youtube_title: c.youtube_title, youtube_description: c.youtube_description, youtube_tags: c.youtube_tags || [],
       hashtags: c.hashtags || [], tiktok_mode: env.TIKTOK_MODE || "inbox", tiktok_privacy: env.TIKTOK_PRIVACY || "SELF_ONLY",
       youtube_privacy: env.YOUTUBE_PRIVACY || "private",
@@ -985,8 +985,12 @@ async function runWeeklyDigest(env, chat, RUN) {
 
 // ---------------- Tự đăng khi anh chưa duyệt (kịp giờ vàng) ----------------
 // Chỉ áp dụng cho bản nháp do Agent tự làm (mặc định agent, plan, video, advice), đạt điểm hội đồng và không còn mục cần anh kiểm tra.
+// AUTO_PUBLISH_ALL (mặc định bật, "0" để tắt): anh không duyệt thì em tự duyệt MỌI bài (kể cả bài anh tự gửi);
+// điểm chưa xác nhận được → tự lược bỏ khỏi bài trước khi đăng; chỉ chặn khi đang chế độ thử.
+const autoAll = (env) => env.AUTO_PUBLISH_ALL !== "0";
 function autoBlockReasons(env, job) {
   const c = job.content || {}, r = [];
+  if (autoAll(env)) return env.DRY_RUN === "1" ? ["đang chế độ thử"] : [];
   const min = Number(env.AUTO_PUBLISH_MIN_SCORE || 7);
   if (c.uncertain?.length) r.push(`còn ${c.uncertain.length} mục cần anh kiểm tra`);
   const qaBad = (c.qa?.issues || []).filter((i) => ["overflow", "typo", "mismatch"].includes(i.type)).length;
@@ -998,14 +1002,14 @@ function autoBlockReasons(env, job) {
 async function armAutoPublish(env, job) {
   if (env.AUTO_PUBLISH === "0") return "";
   const meta = JSON.parse((await kvGet(env, `meta:${job.id}`)) || "{}");
-  if (!list(env.AUTO_PUBLISH_SOURCES || "agent,plan,video,advice,weekly").includes(meta.source || "manual")) return "";
+  if (!autoAll(env) && !list(env.AUTO_PUBLISH_SOURCES || "agent,plan,video,advice,weekly").includes(meta.source || "manual")) return "";
   const min = Number(env.AUTO_PUBLISH_MIN || 30);
   const block = autoBlockReasons(env, job);
   if (block.length) return `\n\n⏸ Chờ anh duyệt (không tự đăng: ${block.join(", ")})`;
   const token = String(Date.now());
   await kvSet(env, `ap:${job.id}`, token);
   await env.JOBS.send({ type: "autopub", jobId: job.id, token }, { delaySeconds: Math.min(min * 60, 43000) });
-  return `\n\n⏱ ${min} phút không bấm → em tự đăng vào giờ vàng`;
+  return `\n\n⏱ ${min} phút không bấm → em tự duyệt và đăng vào giờ vàng${job.content?.uncertain?.length ? " (tự lược bỏ các điểm chưa xác nhận trước khi đăng)" : ""}`;
 }
 async function runAutoPublish(env, jobId, token) {
   if ((await kvGet(env, `ap:${jobId}`)) !== token) return;
@@ -1014,6 +1018,19 @@ async function runAutoPublish(env, jobId, token) {
   if (!job || job.status !== "review" || !job.content || !job.render) return;
   const block = autoBlockReasons(env, job);
   if (block.length) return send(env, job.chat_id, `⏸ Không tự đăng “${job.content.title_line1 || job.id}”: ${block.join(", ")}.`);
+  // Còn điểm chưa xác nhận → tự lược bỏ/viết thận trọng rồi dựng lại poster trước khi đăng
+  if (autoAll(env) && job.content.uncertain?.length) {
+    try {
+      const keep = { bilingual_off: job.content.bilingual_off, share: job.content.share, panel: job.content.panel, trend_look: job.content.trend_look };
+      const fixed = await reviseContent(env, job.content, "Bài sắp tự đăng mà các điểm sau CHƯA xác nhận được. Bỏ hẳn các chi tiết đó (số hiệu, ngày, con số chưa chắc) hoặc viết lại thận trọng, không khẳng định điều chưa kiểm chứng; giữ nguyên phần khác:\n" + job.content.uncertain.map((x) => `- ${x}`).join("\n"), "fast");
+      if (fixed) {
+        job.content = { ...fixed, ...keep, uncertain: [], auto_trimmed: true };
+        job.content.facebook_caption = withFbFooter(job.content.facebook_caption);
+        job.render = await renderJob(env, job);
+        await saveJob(env, job);
+      }
+    } catch (e) { console.log("autotrim", e.message); }
+  }
   const at = nextSlots(env, 1)[0];
   const targets = expandTargets(env, (env.AGENT_TARGETS || "all") + ((await wantsVideo(env, jobId)) ? "," + VIDEO_TARGETS(env).join(",") : "")).join(",");
   await kvSet(env, `sched:${jobId}`, JSON.stringify({ at, targets }));

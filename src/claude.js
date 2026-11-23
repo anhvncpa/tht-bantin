@@ -75,6 +75,28 @@ const toolInput = (msg) => {
   return b.input;
 };
 
+// Bản viết lại (biên tập/hội đồng/sửa) đôi khi bỏ sót trường (vd decision, facts, tiktok_caption) → poster trống ô, video lỗi.
+// Lấy lại trường còn thiếu từ bản trước; điền chú thích TikTok nếu vẫn trống.
+const blank = (v) => v === undefined || v === null || (typeof v === "string" && !v.trim()) || (Array.isArray(v) && !v.length) ||
+  (typeof v === "object" && !Array.isArray(v) && !Object.values(v).some((x) => !blank(x)));
+export function fillMissing(next, prev) {
+  if (!next || typeof next !== "object") return prev;
+  const out = { ...next };
+  for (const [k, v] of Object.entries(prev || {})) {
+    if (blank(out[k]) && !blank(v)) out[k] = v;
+    else if (v && typeof v === "object" && !Array.isArray(v) && out[k] && typeof out[k] === "object" && !Array.isArray(out[k]))
+      for (const [kk, vv] of Object.entries(v)) if (blank(out[k][kk]) && !blank(vv)) out[k] = { ...out[k], [kk]: vv };
+  }
+  return ensureCaptions(out);
+}
+export function ensureCaptions(c) {
+  if (!c || typeof c !== "object") return c;
+  const tags = (c.hashtags || []).map((t) => (String(t).startsWith("#") ? t : "#" + t)).join(" ");
+  if (blank(c.tiktok_caption)) c.tiktok_caption = [c.story_hook || [c.title_line1, c.title_line2].filter(Boolean).join(" "), tags].filter(Boolean).join("\n\n").slice(0, 2000);
+  if (blank(c.youtube_title)) c.youtube_title = [c.title_line1, c.title_line2].filter(Boolean).join(" ").slice(0, 95);
+  return c;
+}
+
 const PAGES_RULE = {
   auto: "",
   "1": "\nYêu cầu: poster đúng 1 trang, để `extra_pages` rỗng.\n",
@@ -106,16 +128,16 @@ export async function generateContent(env, { parts, note = "", verify = true, qu
   if (recentStyles.length) extra += `\nMẫu poster vừa dùng gần đây (mới nhất trước): ${recentStyles.join(", ")}.\n`;
   if (checks) extra += `\n<ghi_chu_kiem_chung>\n${checks}\n</ghi_chu_kiem_chung>\n`;
   const msg = await claude(env, {
-    model: modelFor(env, quality), max_tokens: 8000, system: SYSTEM, tools: [TOOL],
+    model: modelFor(env, quality), max_tokens: 12000, system: SYSTEM, tools: [TOOL],
     tool_choice: { type: "tool", name: "poster_content" },
     messages: [{ role: "user", content: sourceBlocks(parts, extra) }],
   });
-  let content = toolInput(msg);
+  let content = ensureCaptions(toolInput(msg));
   const draft = { title: [content.title_line1, content.title_line2].filter(Boolean).join(" "), caption: String(content.facebook_caption || "").split("\n")[0] };
   hubTag(env, "editor", "Tổng biên tập chấm & viết lại");
   let usage = msg.usage;
   if (env.EDITOR_PASS !== "0") {
-    try { const ed = await editorPass(env, content, checks, quality); content = ed.content; usage = { draft: usage, editor: ed.usage }; }
+    try { const ed = await editorPass(env, content, checks, quality); content = fillMissing(ed.content, content); usage = { draft: usage, editor: ed.usage }; }
     catch (e) { console.log("editorPass lỗi, giữ bản nháp:", e.message); }
   }
   if (pages === "1") content.extra_pages = [];
@@ -125,13 +147,13 @@ export async function generateContent(env, { parts, note = "", verify = true, qu
 
 export async function reviseContent(env, content, instruction, quality = "fast") {
   const msg = await claude(env, {
-    model: modelFor(env, quality), max_tokens: 8000, system: SYSTEM, tools: [TOOL],
+    model: modelFor(env, quality), max_tokens: 12000, system: SYSTEM, tools: [TOOL],
     tool_choice: { type: "tool", name: "poster_content" },
     messages: [{ role: "user", content:
       "Nội dung poster hiện tại (JSON):\n" + JSON.stringify(content) +
       `\n\nSửa theo yêu cầu sau, giữ nguyên phần không được nhắc tới:\n${instruction}` }],
   });
-  return toolInput(msg);
+  return fillMissing(toolInput(msg), content);
 }
 
 // Vòng 2 "Tổng biên tập": chấm bản nháp theo checklist rồi viết lại cho rõ, cuốn hút hơn.
@@ -148,7 +170,7 @@ Giữ nguyên cấu trúc trường, số trang (extra_pages) và các trường
 
 export async function editorPass(env, draft, checks = "", quality = "fast") {
   const msg = await claude(env, {
-    model: modelFor(env, quality), max_tokens: 8000,
+    model: modelFor(env, quality), max_tokens: 12000,
     system: [...SYSTEM, { type: "text", text: EDITOR_RULES }],
     tools: [TOOL], tool_choice: { type: "tool", name: "poster_content" },
     messages: [{ role: "user", content:

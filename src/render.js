@@ -54,7 +54,12 @@ export function applyLook(html, style, look) {
   return html;
 }
 
+// Mẫu 5 (sơ đồ có/không) cần đủ ô decision; thiếu thì dùng mẫu 2 để không ra poster trống ô
+const decisionOk = (c) => { const d = c?.decision || {}; return ["q1", "yes1_title", "q2", "yes2_title", "no_title"].every((k) => String(d[k] || "").trim()); };
+export function safeStyle(style, content) { return String(style) === "5" && !decisionOk(content) ? "2" : style; }
+
 export function pageDocument(style, content, env, qrUrl, index, mode = "a4") {
+  style = safeStyle(style, content);
   const look = content?.trend_look && LOOK_SWAP[style] ? content.trend_look : null;
   const inner = applyLook(renderPage(style, content, opts(env, qrUrl), index), style, look);
   const bg = STYLES[style].bg;
