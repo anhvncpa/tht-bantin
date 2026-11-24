@@ -63,7 +63,11 @@ export async function trackPost(env, kv, post) {
 
 // ---------- 4) Soạn câu trả lời ----------
 const TRIVIAL = (t) => { const s = String(t || "").replace(/[\p{Emoji}\s.!]+/gu, " ").trim(); return !s || s.split(/\s+/).length <= 3; };
+// "ib", "inbox", "xin giá", "tư vấn"… = khách muốn được nhắn riêng → mời nhắn trang hoặc gọi/Zalo
+const WANTS_IB = (t) => /^\s*(ib|inbox|check\s*ib)\b/i.test(String(t || "")) || /^\s*(chấm|\.+|xin\s*giá|báo\s*giá|giá|cần\s*tư\s*vấn|tư\s*vấn(\s*giúp)?|quan\s*tâm)[\s.!?]*$/i.test(String(t || ""));
 async function draftReply(env, comment, title) {
+  const who = comment.from?.name ? comment.from.name.split(" ").pop() : "anh/chị";
+  if (WANTS_IB(comment.message)) return `THT đã nhận ạ. ${who} nhắn tin trực tiếp cho trang hoặc gọi/Zalo 0901 144 078, THT tư vấn ngay cho mình nhé!`;
   if (TRIVIAL(comment.message)) return `Cảm ơn ${comment.from?.name ? comment.from.name.split(" ").pop() : "anh/chị"} đã quan tâm ❤️ Theo dõi THT Audit để nhận tin thuế – kế toán mỗi ngày nhé!`;
   const msg = await claude(env, { model: modelFor(env, "cheap"), max_tokens: 300,
     system: "Bạn là admin fanpage THT Audit (Công ty Kiểm toán & Tư vấn THT), trả lời bình luận bằng tiếng Việt tự nhiên như người thật: xưng THT hoặc em, gọi anh/chị, ngắn gọn 1–3 câu, thân thiện, không văn mẫu, không hashtag. Chỉ trả lời điều chắc chắn; không khẳng định con số/văn bản nếu không chắc. Câu hỏi chuyên môn khó, phức tạp hoặc cần xem hồ sơ cụ thể: trả lời ý chung ngắn (nếu chắc) rồi mời anh/chị liên hệ 0901 144 078 qua điện thoại hoặc Zalo để được tư vấn rõ hơn. Tuyệt đối không gửi link, form hay yêu cầu khách điền/cung cấp thông tin. Chỉ trả về nội dung câu trả lời.",
@@ -90,10 +94,17 @@ export async function pollComments(env, deps) {
   for (const p of posts) {
     let j;
     try { j = await (await fetch(`${graph(env)}/${p.id}/comments?fields=id,message,from{id,name},created_time&order=reverse_chronological&limit=25&access_token=${encodeURIComponent(tok)}`)).json(); } catch (_) { continue; }
-    if (j.error) { if (!(await kv.get(env, "eng:permwarn"))) { await kv.set(env, "eng:permwarn", "1"); await deps.send(deps.chat, `⚠️ Agent tương tác chưa đọc được bình luận Facebook (${j.error.message?.slice(0, 120)}). Cần token có quyền pages_read_user_content + pages_manage_engagement.`); } return; }
+    // Lỗi ở 1 bài (bài đã xoá, thiếu quyền…) → bỏ qua bài đó, KHÔNG dừng cả lượt (trước đây dừng → không lưu "đã xem" → trả lời lặp lại)
+    if (j.error) { if (!(await kv.get(env, "eng:permwarn"))) { await kv.set(env, "eng:permwarn", "1"); await deps.send(deps.chat, `⚠️ Agent tương tác chưa đọc được bình luận Facebook (${j.error.message?.slice(0, 120)}). Cần token có quyền pages_read_user_content + pages_manage_engagement.`); } continue; }
     for (const c of j.data || []) {
       if (seen.has(c.id) || !c.message || c.from?.id === env.FB_PAGE_ID) { seen.add(c.id); continue; }
       seen.add(c.id);
+      await kv.set(env, "eng:seen", JSON.stringify([...seen].slice(-800)));   // lưu ngay, tránh trả lời trùng nếu lượt bị ngắt giữa chừng
+      // Chốt chặn cuối: trang đã trả lời bình luận này rồi thì bỏ qua
+      try {
+        const rr = await (await fetch(`${graph(env)}/${c.id}/comments?fields=from{id}&limit=50&access_token=${encodeURIComponent(tok)}`)).json();
+        if ((rr.data || []).some((x) => x.from?.id === env.FB_PAGE_ID)) continue;
+      } catch (_) {}
       // Cẩm nang: trả lời tự động kèm link PDF
       if (p.kind === "handbook" && /c[aẩâ]m\s*nang/i.test(c.message) && p.pdf) {
         try { await fbComment(env, c.id, `THT gửi ${c.from?.name ? c.from.name.split(" ").pop() : "anh/chị"} bản PDF Cẩm nang Giám đốc ạ: ${p.pdf}\nCần trao đổi thêm cho doanh nghiệp mình, anh/chị gọi hoặc nhắn Zalo 0901 144 078 nhé.`); } catch (e) { console.log("hb reply", e.message); }
